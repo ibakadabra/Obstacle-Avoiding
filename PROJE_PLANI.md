@@ -12,6 +12,7 @@ feasibility sınırının analizi ve deneysel doğrulaması
 - QP: prototipte cvxpy, döngüde OSQP doğrudan. Infeasible → maks fren + logla.
 - Engel EKF custom yazılacak (robot_localization engel takamaz).
 - İş bölümü: çekirdek kodu İbrahim yazar; Claude spek, kod incelemesi, deney altyapısı, dokümantasyon.
+- **D1 KARARI (Faz 0 sonu):** CBF formülasyonu **lookahead noktası** ile devam eder. Collision-cone (C3BF) karşılaştırması yapılmadı — **future work** olarak tez metninde işaretlenecek (kısıtlar bölümü).
 
 ## Takvim
 

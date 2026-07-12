@@ -85,7 +85,9 @@ def test_filter_slows_head_on():
     u_nom = np.array([0.22, 0.0])
     x_r = np.array([0.0, 0.0, 0.0])
     d_safe = cfg.filter.d_safe(cfg.robot, cfg.obstacle)
-    x_o = np.array([d_safe + 0.05, 0.0, 0.0, 0.0])   # sınırın hemen dışında
+    # Mesafe lookahead noktasından (robot merkezinden l ileride) ölçülüyor;
+    # engeli ona göre d_safe+0.05 uzağa koy (l'yi de ekle).
+    x_o = np.array([cfg.robot.lookahead + d_safe + 0.05, 0.0, 0.0, 0.0])
     u_safe, info = safety_filter(u_nom, x_r, x_o, Mode.REACTIVE, cfg)
     assert info.feasible
     assert u_safe[0] < u_nom[0]
@@ -100,8 +102,10 @@ def test_input_bounds_respected():
         x_o = np.array([*rng.uniform(-2, 2, 2), *rng.uniform(-1.5, 1.5, 2)])
         u_nom = np.array([rng.uniform(0, 0.22), rng.uniform(-2.84, 2.84)])
         u_safe, _ = safety_filter(u_nom, x_r, x_o, Mode.REACTIVE, cfg)
-        assert -1e-9 <= u_safe[0] <= 0.22 + 1e-9
-        assert abs(u_safe[1]) <= 2.84 + 1e-9
+        # OSQP ADMM iteratif çözücü: kısıtları makine hassasiyetine değil,
+        # kendi yakınsama toleransına (~1e-3) kadar sağlar. 1e-9 gerçekçi değildi.
+        assert -1e-4 <= u_safe[0] <= 0.22 + 1e-4
+        assert abs(u_safe[1]) <= 2.84 + 1e-4
 
 
 def test_infeasible_flagged_and_brakes():

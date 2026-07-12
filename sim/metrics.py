@@ -33,4 +33,35 @@ def compute_metrics(log: RunLog, cfg: Config) -> RunMetrics:
 
     TODO(İbrahim): implement et.
     """
-    raise NotImplementedError
+    n = len(log.t)
+    dt = cfg.sim.dt
+    contact_thresh = cfg.robot.radius + cfg.obstacle.radius
+
+    d_min = np.inf
+    infeasible_count = 0
+    first_infeasible_t = None
+    intervention_int = 0.0
+    intervention_peak = 0.0
+
+    for k in range(n):
+        distance = np.linalg.norm(log.x_r[k][:2] - log.x_o[k][:2])
+        d_min = min(d_min, distance)
+        if not log.info[k].feasible:
+            infeasible_count += 1
+            if first_infeasible_t is None:
+                first_infeasible_t = log.t[k]
+        intervention_int += log.info[k].intervention*dt
+        intervention_peak = max(intervention_peak, log.info[k].intervention)
+
+    return RunMetrics(
+        collided=d_min < contact_thresh,
+        d_min=d_min,
+        infeasible_rate=infeasible_count / n,
+        first_infeasible_t=first_infeasible_t,
+        reached_goal=log.reached_goal,
+        time_to_goal=log.t[-1] if log.reached_goal else None,
+        intervention_int=intervention_int,
+        intervention_peak=intervention_peak,
+    )
+
+

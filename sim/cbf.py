@@ -1,5 +1,4 @@
-"""Görev 1b (İbrahim): CBF-QP güvenlik filtresi — tezin çekirdeği.
-
+"""
 Üç mod, TEK fark h ve ḣ'nin nasıl kurulduğu:
 
   REACTIVE : engel statik varsayılır  → ∂h/∂t terimi YOK
@@ -14,16 +13,14 @@ QP (lookahead formülasyonu, D1 kararına kadar):
 
   Δp = p_lookahead − p_o_effective
   h  = ‖Δp‖² − d_safe²
-
 Infeasible ise: u_safe = [0, 0] (maks fren) döndür, feasible=False işaretle.
 """
 from dataclasses import dataclass
 from enum import Enum, auto
-
 import numpy as np
-
 from params import Config
-
+import dynamics
+import cvxpy as cp
 
 class Mode(Enum):
     REACTIVE = auto()
@@ -33,19 +30,18 @@ class Mode(Enum):
 
 @dataclass
 class FilterInfo:
-    """Her çağrının teşhis çıktısı — metrikler bunlardan hesaplanır."""
     feasible: bool
     h: float                 # kısıt kurulurken kullanılan h değeri
     intervention: float      # ‖u_safe − u_nom‖
     active: bool             # kısıt aktif miydi (u değişti mi)
+    
 
 
 def h_value(p_eff: np.ndarray, p_obs_eff: np.ndarray, d_safe: float) -> float:
-    """h = ‖p_eff − p_obs_eff‖² − d_safe²
-
-    TODO(İbrahim): implement et.
-    """
-    raise NotImplementedError
+    diff = p_eff - p_obs_eff
+    dist_sq = diff @ diff          # dx*dx + dy*dy = dx² + dy²  (skaler!)
+    return dist_sq - d_safe**2
+  
 
 
 def safety_filter(
@@ -53,24 +49,48 @@ def safety_filter(
     x_r: np.ndarray,
     x_o: np.ndarray,
     mode: Mode,
-    cfg: Config,
-) -> tuple[np.ndarray, FilterInfo]:
-    """u_nom'u güvenli hale getir (minimum müdahale).
+    cfg: Config) -> tuple[np.ndarray, FilterInfo]:
+    
+    p_eff = dynamics.lookahead_point(x_r, cfg.robot.lookahead)
+    if mode == Mode.SHIFT:
+      p_obs_eff = np.array([
+        x_o[0] + x_o[2] * cfg.filter.T_horizon,
+        x_o[1] + x_o[3] * cfg.filter.T_horizon
+    ])
+    else:
+        p_obs_eff = x_o[:2]
+    delta_p = p_eff - p_obs_eff 
+    if mode == Mode.DCBF:
+        h_ek = -2 * delta_p @ x_o[2:]  
+    else: 
+        h_ek = 0.0
+  
+    d_safe = cfg.filter.d_safe(cfg.robot, cfg.obstacle)
+    h = h_value(p_eff, p_obs_eff, d_safe)
+    theta = x_r[2]
+    G = dynamics.lookahead_velocity_matrix(theta, cfg.robot.lookahead)
+ 
+    u = cp.Variable(2)
+    objective = cp.Minimize(cp.sum_squares(u - u_nom))
+    constraints = [
+        2 * delta_p @ (G @ u) + h_ek >= -cfg.filter.alpha * h,
+        u[0] >= cfg.robot.v_min,
+        u[0] <= cfg.robot.v_max,
+        cp.abs(u[1]) <= cfg.robot.w_max,
+        ]
+    problem = cp.Problem(objective, constraints)
+    problem.solve(solver=cp.OSQP)
 
-    Adımlar:
-      1. Moda göre efektif engel konumu ve ḣ ek terimini belirle:
-         - REACTIVE: p_o_eff = x_o[:2],              ek terim = 0
-         - SHIFT   : p_o_eff = x_o[:2] + x_o[2:]*T,  ek terim = 0
-         - DCBF    : p_o_eff = x_o[:2],              ek terim = -2·Δpᵀ·x_o[2:]
-           (ek terim güvenlik kısıtının SOL tarafına sabit olarak eklenir:
-            2·Δpᵀ·G·u + ek_terim ≥ −α·h)
-      2. Lookahead noktası ve G matrisi (dynamics.py'den).
-      3. QP'yi kur ve çöz (ilk sürüm: cvxpy + OSQP backend).
-      4. Çözümsüzse u_safe=[0,0], feasible=False.
-      5. Engel sensör menzili dışındaysa (‖p_r−p_o‖ > cfg.sim.sensor_range):
-         filtre devre dışı → u_nom aynen geçer, h=inf, active=False.
+    if problem.status != "optimal":
+        u_safe = np.array([0.0, 0.0])
+        feasible = False
+    else:
+        u_safe = u.value
+        feasible = True
+    intervention = np.linalg.norm(u_safe - u_nom)
+    active = intervention > 1e-6
+    info = FilterInfo(feasible=feasible, h=h, intervention=intervention, active=active)
 
-    TODO(İbrahim): implement et. Önce REACTIVE'i testlerden geçir,
-    sonra DCBF ve SHIFT'i ekle (fark sadece 1. adımda).
-    """
-    raise NotImplementedError
+    return u_safe, info
+
+
