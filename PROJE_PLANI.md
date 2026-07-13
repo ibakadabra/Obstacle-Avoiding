@@ -18,9 +18,8 @@ feasibility sınırının analizi ve deneysel doğrulaması
 
 | Hafta | İş | Çıktı / kapı |
 |---|---|---|
-| **1–2** | **Faz 0:** numpy unicycle sim (iskelet hazır: `sim/`) + 1D kapalı-form sınır türetmesi. D1 kararı (lookahead vs C3BF) burada verilir | Sayısal sınır ↔ analitik eğri figürü |
-| **3–5** | **Faz 1:** TB3 Gazebo Classic + Nav2 DWB bringup; CBF filtre node'u (cmd_vel remap); hareketli engel; gecikme enjeksiyonu | Uçtan uca tek senaryo çalışıyor |
-| **6** | Engel EKF node'u (lidar kümeleme + sabit-hız EKF) | EKF vs ground truth karşılaştırması |
+| **1–2** | **Faz 0:** numpy unicycle sim (iskelet hazır: `sim/`) + 1D kapalı-form sınır türetmesi. D1 kararı (lookahead vs C3BF) burada verilir. **+ EKF çekirdeği** (`sim/ekf.py`, predict/update, sentetik gürültülü ölçümle test — ROS'suz, dynamics/cbf ile aynı mantık) | Sayısal sınır ↔ analitik eğri figürü + EKF birim testleri yeşil |
+| **3–5** | **Faz 1:** TB3 Gazebo Classic + Nav2 DWB bringup; CBF filtre node'u (cmd_vel remap); hareketli engel; gecikme enjeksiyonu; **lidar→kümeleme adaptörü + EKF'nin ROS node sarmalı** (matematik zaten hazır) | Uçtan uca tek senaryo çalışıyor, EKF vs ground truth karşılaştırması |
 | **7–9** | **Faz 2:** batch koşucu + tam süpürme (4 hız × modlar × N=20) + ablasyon (mükemmel durum vs EKF) + τ süpürmesi | Sınır haritası v1 |
 | **10–13** | **Faz 3 (donanım gelirse):** TB3 bring-up, τ ölçümü, tavan kamerası + ArUco, engel düzeneği (RC araba/ray), oran 1×–2× doğrulama | Donanım noktaları haritada |
 | **14–16** | Yazım: bildiri/tez bölümleri (metot + bulgular) | Taslak teslim |
