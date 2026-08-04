@@ -1,5 +1,0 @@
-  File "/home/tusaslab7/tez_cbf/ros2_ws/install/cbf_filter_pkg/lib/python3.10/site-packages/cbf_filter_pkg/safety_filter_node.py", line 1
-    oimport rclpy
-            ^^^^^
-SyntaxError: invalid syntax
-

@@ -1,3 +1,0 @@
-[console_scripts]
-obstacle_chaser_node = cbf_filter_pkg.obstacle_chaser_node:main
-safety_filter_node = cbf_filter_pkg.safety_filter_node:main
