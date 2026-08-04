@@ -11,12 +11,18 @@ v1 kısıtları (bilinçli, sonraki önceliklerde genişleyecek):
     HER KOŞU ÖNCESİ TAZE başlatılmış olduğu varsayılıyor (dogal spawn = orijin).
   - Engel konumu sil+yeniden-oluştur ile ayarlanıyor (kanıtlanmış yöntem).
   - Sonlanma kriteri şimdilik sadece `duration` (zaman aşımı). h(x)<0 anlık
-    durdurma, teşhis topic'leri (Öncelik 2, /safety_filter/h_value) eklenince
-    gelecek — o olmadan node'un h değerini bilmesinin yolu yok.
+    durdurma icin Oncelik 2'nin (/safety_filter/h_value) node icinde
+    ABONE OLUNMASI gerekiyor (henuz yapilmadi, sadece disaridan kaydediliyor).
+
+Öncelik 3 (bu sürüm): her koşu rosbag2 ile kaydedilir; Öncelik 2'nin teşhis
+topic'leri (h_value, qp_status, qp_solve_time_ms, cmd_vel_nominal) olmadan
+sonuç bag'inden h(x)/QP durumu analiz edilemezdi.
 
 Kullanım:
-    ros2 run cbf_filter_pkg scenario_node <config.yaml>
+    ros2 run cbf_filter_pkg scenario_node <config.yaml> [bag_output_dir]
+    (bag_output_dir verilmezse ~/tez_cbf/results/<isim>_<zaman damgasi>)
 """
+import os
 import subprocess
 import sys
 import time
@@ -29,9 +35,19 @@ from rclpy.node import Node
 
 OBSTACLE_SDF_PATH = '/home/tusaslab7/tez_cbf/moving_obstacle.sdf'
 
+BAG_TOPICS = [
+    '/odom',
+    '/moving_obstacle/odom',
+    '/safety_filter/cmd_vel_nominal',
+    '/cmd_vel',
+    '/safety_filter/h_value',
+    '/safety_filter/qp_status',
+    '/safety_filter/qp_solve_time_ms',
+]
+
 
 class ScenarioNode(Node):
-    def __init__(self, config_path: str):
+    def __init__(self, config_path: str, bag_dir: str = None):
         super().__init__('scenario_node')
 
         with open(config_path) as f:
@@ -50,6 +66,15 @@ class ScenarioNode(Node):
         obs_start = sc['obstacle']['start']
         self.get_logger().info(f'Engel yeniden konumlandiriliyor: {obs_start}')
         self._respawn_obstacle(obs_start)
+
+        if bag_dir is None:
+            ts = time.strftime('%Y-%m-%d_%H-%M-%S')
+            bag_dir = os.path.expanduser(
+                f"~/tez_cbf/results/{sc.get('name', 'run')}_{ts}")
+        self.bag_proc = subprocess.Popen(
+            ['ros2', 'bag', 'record', '-o', bag_dir] + BAG_TOPICS,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        self.get_logger().info(f'rosbag kaydi basladi: {bag_dir}')
 
         self.get_logger().info(f'{settle_time:.1f}s sistem oturmasi bekleniyor...')
         time.sleep(settle_time)
@@ -95,13 +120,23 @@ class ScenarioNode(Node):
             self.pub_obstacle_cmd.publish(Twist())
             self.pub_robot_cmd.publish(Twist())
             self.timer.cancel()
+            self._stop_bag()
             rclpy.shutdown()
+
+    def _stop_bag(self) -> None:
+        self.bag_proc.terminate()
+        try:
+            self.bag_proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            self.bag_proc.kill()
+        self.get_logger().info('rosbag kaydi durduruldu.')
 
 
 def main():
     rclpy.init()
     config_path = sys.argv[1] if len(sys.argv) > 1 else 'configs/lateral_offset.yaml'
-    node = ScenarioNode(config_path)
+    bag_dir = sys.argv[2] if len(sys.argv) > 2 else None
+    node = ScenarioNode(config_path, bag_dir)
     try:
         rclpy.spin(node)
     except rclpy.executors.ExternalShutdownException:
