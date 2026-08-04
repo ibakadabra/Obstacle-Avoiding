@@ -11,12 +11,22 @@ class RobotParams:
     v_max: float = 0.22          # m/s   (donanım limiti)
     v_min: float = 0.0           # m/s   (geri gitmek yok — tez varsayımı, gerekirse gevşet)
     w_max: float = 2.84          # rad/s (donanım limiti)
-    radius: float = 0.105        # m     (Burger footprint yarıçapı, ~105 mm)
+    # 0.1237 m: TB3 Burger'in gercek (dairesel OLMAYAN) govde kutusundan
+    # (turtlebot3_description/urdf/turtlebot3_burger.urdf: collision box
+    # 0.140x0.140, origin (-0.032,0,0.070)) turetilen EN KOTU DURUM (en uzak
+    # kose) cevre-daire yaricapi:
+    #   sqrt((0.032+0.070)^2 + 0.070^2) = 0.1237 m
+    # Onceki deger (0.105 m, "~105mm" olarak dogrulanmadan yorumlanmisti)
+    # gercek govdeden ~19 mm KUCUKTU -- d_safe'i gerekenden az konservatif
+    # yapiyordu. Tekerlekler (y=+-0.08m, ustten gorunumde 0.033x0.018m
+    # dikdortgen) kutudan daha az cikinti yapiyor, sinirlayici olan govde.
+    radius: float = 0.1237       # m
     lookahead: float = 0.10      # m     (l — lookahead noktası ofseti; D1 kararına tabi)
 
 
 @dataclass
 class ObstacleParams:
+    # moving_obstacle.sdf'teki silindir collision geometrisinden dogrulandi.
     radius: float = 0.25         # m     (insan bacağı/RC araba eşdeğeri)
     speed: float = 0.44          # m/s   (süpürmede değişir: 0.22/0.44/0.88/1.32)
 
@@ -24,11 +34,16 @@ class ObstacleParams:
 @dataclass
 class FilterParams:
     alpha: float = 1.0           # CBF sınıf-K katsayısı (D2: kalibre edilecek)
-    d_margin: float = 0.05       # m     (ek güvenlik marjı)
+    d_margin: float = 0.05       # m     (ek güvenlik marjı — safety_margin)
     T_horizon: float = 0.0       # s     (SHIFT modunda öngörü ufku; 0 = reaktif eşdeğeri)
 
+    def contact_distance(self, robot: RobotParams, obs: ObstacleParams) -> float:
+        """Merkez-merkez fiziksel temas mesafesi (govde+engel yaricaplari).
+        d_safe'ten AYRI: bu tasarim parametresi degil, geometriden gelen sabit."""
+        return robot.radius + obs.radius
+
     def d_safe(self, robot: RobotParams, obs: ObstacleParams) -> float:
-        return robot.radius + obs.radius + self.d_margin
+        return self.contact_distance(robot, obs) + self.d_margin
 
 
 @dataclass

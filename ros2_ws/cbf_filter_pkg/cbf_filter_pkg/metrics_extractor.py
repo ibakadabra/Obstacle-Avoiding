@@ -1,22 +1,30 @@
-"""Metrik cikarici (Oncelik 4, deney kosucusu spec'i).
+"""Metrik cikarici (Oncelik 4, deney kosucusu spec'i; ISI 1'de d_safe/contact
+duzeltmesiyle genisletildi).
 
 rosbag2 kayitlarindan koşu basina TEK bir metrics.csv satiri uretir.
-Onemli: collision, qp_infeasible ve d_min BIRBIRINDEN BAGIMSIZ, farkli
-seyler olcen 3 ayri metriktir (spec'in kendi vurgusu):
-  - d_min: robot-engel merkezleri arasi en kucuk mesafe (fiziksel gerceklik)
-  - collision: d_min < --contact-radius (fiziksel temas esigi, d_safe'den
-    FARKLI -- d_safe kontrol marjidir, contact-radius govde yaricapi toplamidir)
-  - margin_violation: d_min < d_safe (kontrol marji ihlali, CARPMA DEGIL)
+Onemli: contact, margin_violation ve qp_infeasible BIRBIRINDEN BAGIMSIZ,
+farkli seyler olcen 3 ayri metriktir:
+  - d_min: robot-engel merkezleri arasi en kucuk mesafe, RAW /odom
+    konumlarindan (FIZIKSEL govde-govde mesafesi -- CBF'nin kullandigi
+    lookahead noktasindan (p_eff, robot merkezinden ~0.10m ileride) FARKLI;
+    fiziksel temas govde ile olur, lookahead noktasiyla degil).
+  - contact: d_min < contact_distance (govde+engel yaricaplari toplami,
+    URDF/SDF'ten dogrulanmis geometrik sabit -- ISI 1, Agu 2026).
+  - margin_violation: h_min < 0, DOGRUDAN /safety_filter/h_value'dan (CBF'nin
+    KENDI hesapladigi, lookahead noktasini kullanan otoriter deger). ONCEDEN
+    (Agu 2026 ilk surum) bu yanlislikla d_min<d_safe olarak YENIDEN
+    turetiliyordu -- d_min raw govde mesafesi oldugu icin lookahead-tabanli
+    h_value ile SISTEMATIK OLARAK UYUSMUYORDU. Duzeltildi.
   - qp_infeasible: QP'nin cozulemedigi an oldu mu (aktuasyon kisiti +
     CBF kisitinin CELISMESI, mesafeyle dogrudan ilgisi yok)
 
 Kullanim:
-    ros2 run cbf_filter_pkg metrics_extractor <results_dir> [output_csv]
+    ros2 run cbf_filter_pkg metrics_extractor <results_dir> [output_csv] [--force]
 
 <results_dir> altindaki TUM bag klasorlerini tarar (idempotent: output_csv'de
 zaten bir satiri olan run'lar --force verilmedikce atlanir), her biri icin
 yaninda duran <bag_dir>_config.yaml varsa (scenario_node Oncelik 4 oncesi
-kayitlar icin olmayabilir) alpha/d_safe/control_rate/prediction_horizon
+kayitlar icin olmayabilir) alpha/d_safe/mode/control_rate/prediction_horizon
 sutunlarini doldurur.
 """
 import csv
@@ -30,14 +38,22 @@ from rosidl_runtime_py.utilities import get_message
 
 CSV_FIELDS = [
     'run_name', 'bag_dir', 'n_msgs',
-    'alpha', 'd_safe', 'control_rate', 'prediction_horizon',
-    'd_min', 'collision', 'margin_violation',
+    'alpha', 'd_safe', 'mode', 'control_rate', 'prediction_horizon',
+    'd_min', 'contact_distance', 'h_at_contact', 'contact',
+    'margin_violation', 'penetration_depth_m',
     'qp_infeasible_count', 'qp_infeasible_any',
     'h_min',
     'solve_time_mean_ms', 'solve_time_max_ms',
 ]
 
-DEFAULT_CONTACT_RADIUS = 0.30  # govde yaricaplari toplami -- KONTROL ET
+# params.py (cbf_filter_pkg) ile AYNI, ISI 1'de URDF/SDF'ten dogrulanan
+# degerler: robot.radius=0.1237 (govde kutusunun en kotu-durum kose yaricapi),
+# obstacle.radius=0.25 (moving_obstacle.sdf silindiri), d_margin=0.05.
+DEFAULT_ROBOT_RADIUS = 0.1237
+DEFAULT_OBSTACLE_RADIUS = 0.25
+DEFAULT_D_MARGIN = 0.05
+DEFAULT_CONTACT_DISTANCE = DEFAULT_ROBOT_RADIUS + DEFAULT_OBSTACLE_RADIUS
+DEFAULT_D_SAFE = DEFAULT_CONTACT_DISTANCE + DEFAULT_D_MARGIN
 
 
 def _read_bag(bag_dir: str) -> dict:
@@ -96,22 +112,30 @@ def _d_min(robot_xy, obstacle_xy) -> float:
     return best
 
 
-def extract_one(bag_dir: str, contact_radius: float) -> dict:
+def extract_one(bag_dir: str, contact_distance: float) -> dict:
     data = _read_bag(bag_dir)
 
     cfg_path = bag_dir.rstrip('/').rstrip('\\') + '_config.yaml'
-    alpha = d_safe = control_rate = prediction_horizon = ''
+    alpha = d_safe = mode = control_rate = prediction_horizon = ''
     if os.path.exists(cfg_path):
         with open(cfg_path) as f:
             cfg = yaml.safe_load(f) or {}
         filt = cfg.get('filter', {})
         alpha = filt.get('alpha', '')
         d_safe = filt.get('d_safe', '')
+        mode = filt.get('mode', '')
         control_rate = filt.get('control_rate', '')
         prediction_horizon = filt.get('prediction_horizon', '')
 
+    # d_safe bu bag icin bilinmiyorsa (eski kayit / config.yaml yok) DEFAULT_D_SAFE
+    # kullanilir -- h_at_contact SADECE bilgilendirici bir referans esik,
+    # margin_violation'i etkilemez (o dogrudan h_min'den geliyor).
+    d_safe_val = float(d_safe) if d_safe not in ('', None) else DEFAULT_D_SAFE
+
     dmin = _d_min(data['robot_xy'], data['obstacle_xy'])
+    h_min = min(data['h_values']) if data['h_values'] else float('nan')
     infeasible_count = sum(1 for s in data['qp_statuses'] if s == 'infeasible')
+    h_at_contact = contact_distance ** 2 - d_safe_val ** 2
 
     row = {
         'run_name': os.path.basename(bag_dir.rstrip('/').rstrip('\\')),
@@ -119,14 +143,21 @@ def extract_one(bag_dir: str, contact_radius: float) -> dict:
         'n_msgs': data['n_msgs'],
         'alpha': alpha,
         'd_safe': d_safe,
+        'mode': mode,
         'control_rate': control_rate,
         'prediction_horizon': prediction_horizon,
         'd_min': f'{dmin:.4f}' if dmin == dmin else '',  # NaN kontrolu
-        'collision': int(dmin < contact_radius) if dmin == dmin else '',
-        'margin_violation': (int(dmin < float(d_safe)) if d_safe != '' and dmin == dmin else ''),
+        'contact_distance': f'{contact_distance:.4f}',
+        'h_at_contact': f'{h_at_contact:.4f}',
+        'contact': int(dmin < contact_distance) if dmin == dmin else '',
+        # margin_violation: DOGRUDAN h_min'den (otoriter, lookahead-noktasi
+        # dahil CBF hesaplamasinin ta kendisi) -- d_min'den YENIDEN turetilmez.
+        'margin_violation': int(h_min < 0) if h_min == h_min else '',
+        'penetration_depth_m': (f'{max(0.0, contact_distance - dmin):.4f}'
+                                 if dmin == dmin else ''),
         'qp_infeasible_count': infeasible_count,
         'qp_infeasible_any': int(infeasible_count > 0),
-        'h_min': f'{min(data["h_values"]):.4f}' if data['h_values'] else '',
+        'h_min': f'{h_min:.4f}' if h_min == h_min else '',
         'solve_time_mean_ms': (f'{sum(data["solve_times"]) / len(data["solve_times"]):.4f}'
                                 if data['solve_times'] else ''),
         'solve_time_max_ms': f'{max(data["solve_times"]):.4f}' if data['solve_times'] else '',
@@ -137,17 +168,17 @@ def extract_one(bag_dir: str, contact_radius: float) -> dict:
 def main():
     if len(sys.argv) < 2:
         print('Kullanim: metrics_extractor <results_dir> [output_csv] [--force] '
-              f'[--contact-radius R] (varsayilan R={DEFAULT_CONTACT_RADIUS})')
+              f'[--contact-distance D] (varsayilan D={DEFAULT_CONTACT_DISTANCE:.4f})')
         sys.exit(1)
 
     results_dir = os.path.expanduser(sys.argv[1])
     args = sys.argv[2:]
     force = '--force' in args
-    if '--contact-radius' in args:
-        contact_radius = float(args[args.index('--contact-radius') + 1])
+    if '--contact-distance' in args:
+        contact_distance = float(args[args.index('--contact-distance') + 1])
     else:
-        contact_radius = DEFAULT_CONTACT_RADIUS
-    positional = [a for a in args if not a.startswith('--') and a != str(contact_radius)]
+        contact_distance = DEFAULT_CONTACT_DISTANCE
+    positional = [a for a in args if not a.startswith('--') and a != str(contact_distance)]
     output_csv = os.path.expanduser(positional[0]) if positional else os.path.join(results_dir, 'metrics.csv')
 
     bag_dirs = sorted(
@@ -171,7 +202,7 @@ def main():
             continue
         print(f'Isleniyor: {run_name}')
         try:
-            new_rows.append(extract_one(bag_dir, contact_radius))
+            new_rows.append(extract_one(bag_dir, contact_distance))
         except Exception as e:
             print(f'  HATA ({run_name}): {e!r} -- atlaniyor')
 
