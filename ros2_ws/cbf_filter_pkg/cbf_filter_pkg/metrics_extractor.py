@@ -44,7 +44,18 @@ CSV_FIELDS = [
     'qp_infeasible_count', 'qp_infeasible_any',
     'h_min',
     'solve_time_mean_ms', 'solve_time_max_ms',
+    # ISI 2 (Agu 2026): bedel metrikleri -- DCBF'in "guvenli" olmasi tek
+    # basina bulgu degil, hangi bedelle guvenli oldugu onemli.
+    'goal_x_m', 'final_x_m', 'goal_reached', 'time_to_goal_s',
+    'path_length_m',
+    'intervention_integral', 'intervention_max', 'intervention_duration_s',
+    'v_mean', 'v_min', 'frozen',
 ]
+
+FROZEN_V_THRESH = 0.01      # m/s   -- bu esigin altinda "durmus" sayilir
+FROZEN_MIN_DURATION = 2.0   # s     -- bu sureden uzun surerse "frozen"
+INTERVENTION_THRESH = 1e-3  # ‖u_safe-u_nom‖ bu esigin ustundeyse "mudahale aktif"
+GOAL_FRACTION = 0.95        # nominal mesafenin bu oranina ulasilirsa "goal_reached"
 
 # params.py (cbf_filter_pkg) ile AYNI, ISI 1'de URDF/SDF'ten dogrulanan
 # degerler: robot.radius=0.1237 (govde kutusunun en kotu-durum kose yaricapi),
@@ -67,18 +78,23 @@ def _read_bag(bag_dir: str) -> dict:
 
     robot_xy, obstacle_xy = [], []
     h_values, qp_statuses, solve_times = [], [], []
+    odom_t = []          # (t_s, x, y, v_actual)  -- /odom, v_actual=twist.linear.x
+    cmd_actual = []       # (t_s, v, w)            -- /cmd_vel (u_safe, filtreden SONRA)
+    cmd_nominal = []      # (t_s, v, w)            -- /safety_filter/cmd_vel_nominal (u_nom)
     n_msgs = 0
 
     while reader.has_next():
-        topic, data, _t = reader.read_next()
+        topic, data, t_ns = reader.read_next()
         n_msgs += 1
         if topic not in msg_types:
             continue
         msg = deserialize_message(data, msg_types[topic])
+        t_s = t_ns / 1e9
 
         if topic == '/odom':
             p = msg.pose.pose.position
             robot_xy.append((p.x, p.y))
+            odom_t.append((t_s, p.x, p.y, msg.twist.twist.linear.x))
         elif topic == '/moving_obstacle/odom':
             p = msg.pose.pose.position
             obstacle_xy.append((p.x, p.y))
@@ -88,9 +104,14 @@ def _read_bag(bag_dir: str) -> dict:
             qp_statuses.append(msg.data)
         elif topic == '/safety_filter/qp_solve_time_ms':
             solve_times.append(msg.data)
+        elif topic == '/cmd_vel':
+            cmd_actual.append((t_s, msg.linear.x, msg.angular.z))
+        elif topic == '/safety_filter/cmd_vel_nominal':
+            cmd_nominal.append((t_s, msg.linear.x, msg.angular.z))
 
     return dict(robot_xy=robot_xy, obstacle_xy=obstacle_xy, h_values=h_values,
-                qp_statuses=qp_statuses, solve_times=solve_times, n_msgs=n_msgs)
+                qp_statuses=qp_statuses, solve_times=solve_times, n_msgs=n_msgs,
+                odom_t=odom_t, cmd_actual=cmd_actual, cmd_nominal=cmd_nominal)
 
 
 def _d_min(robot_xy, obstacle_xy) -> float:
@@ -112,11 +133,87 @@ def _d_min(robot_xy, obstacle_xy) -> float:
     return best
 
 
+def _path_metrics(odom_t):
+    """path_length, v_mean, v_min, frozen -- /odom'un (t,x,y,v) dizisinden."""
+    if len(odom_t) < 2:
+        return dict(path_length=float('nan'), v_mean=float('nan'),
+                    v_min=float('nan'), frozen=0, final_x=float('nan'), t0=float('nan'))
+    t0 = odom_t[0][0]
+    path_length = 0.0
+    for (_, x0, y0, _), (_, x1, y1, _) in zip(odom_t, odom_t[1:]):
+        path_length += ((x1 - x0) ** 2 + (y1 - y0) ** 2) ** 0.5
+    vs = [v for (_, _, _, v) in odom_t]
+    v_mean, v_min = sum(vs) / len(vs), min(vs)
+
+    # frozen: v < esik olan ARDISIK bir zaman penceresi >= FROZEN_MIN_DURATION
+    frozen = 0
+    window_start = None
+    for t, _, _, v in odom_t:
+        if v < FROZEN_V_THRESH:
+            if window_start is None:
+                window_start = t
+            elif t - window_start >= FROZEN_MIN_DURATION:
+                frozen = 1
+                break
+        else:
+            window_start = None
+
+    final_x = odom_t[-1][1]
+    return dict(path_length=path_length, v_mean=v_mean, v_min=v_min,
+                frozen=frozen, final_x=final_x, t0=t0)
+
+
+def _goal_metrics(odom_t, t0, nominal_v, duration):
+    """goal_x: engel olmasaydi kat edilecek nominal mesafe (duz cizgi varsayimi,
+    senaryolarda omega_nom=0 oldugu icin gecerli). goal_reached: robot bu
+    mesafenin >= GOAL_FRACTION'ina ulasti mi. time_to_goal: ilk ulasma ani
+    (ilk /odom mesajina gore GORECELI zaman -- t0 senaryonun gercek
+    sifiri degil, bag'deki ilk odom ornegi; settle_time kadar sistematik
+    bir kaymasi olabilir, bu YAKLASIKTIR)."""
+    if nominal_v is None or duration is None or not odom_t:
+        return dict(goal_x=float('nan'), goal_reached='', time_to_goal=float('nan'))
+    goal_x = nominal_v * duration
+    threshold_x = GOAL_FRACTION * goal_x
+    time_to_goal = float('nan')
+    reached = 0
+    for t, x, _, _ in odom_t:
+        if x >= threshold_x:
+            reached = 1
+            time_to_goal = t - t0
+            break
+    return dict(goal_x=goal_x, goal_reached=reached, time_to_goal=time_to_goal)
+
+
+def _intervention_metrics(cmd_actual, cmd_nominal):
+    """intervention(t) = ||u_safe-u_nom|| (cbf.py'nin FilterInfo.intervention
+    ile AYNI tanim: v ve w'yi tek bir Oklid normunda karistirir). cmd_actual
+    ve cmd_nominal AYNI callback'ten (on_cmd_nom) art arda yayinlandigi icin
+    INDEKSE gore eslestirilir (zaman damgasiyla degil -- robot/engel
+    eslestirmesindeki gibi bir belirsizlik YOK, ayni olayin iki cikisidir)."""
+    n = min(len(cmd_actual), len(cmd_nominal))
+    if n == 0:
+        return dict(integral=float('nan'), max_=float('nan'), duration=float('nan'))
+    mags, ts = [], []
+    for i in range(n):
+        t, va, wa = cmd_actual[i]
+        _, vn, wn = cmd_nominal[i]
+        mags.append(((va - vn) ** 2 + (wa - wn) ** 2) ** 0.5)
+        ts.append(t)
+    integral = 0.0
+    for i in range(1, n):
+        dt = ts[i] - ts[i - 1]
+        integral += 0.5 * (mags[i] + mags[i - 1]) * dt
+    duration = sum(
+        (ts[i] - ts[i - 1]) for i in range(1, n) if mags[i] > INTERVENTION_THRESH)
+    return dict(integral=integral, max_=max(mags), duration=duration)
+
+
 def extract_one(bag_dir: str, contact_distance: float) -> dict:
     data = _read_bag(bag_dir)
 
     cfg_path = bag_dir.rstrip('/').rstrip('\\') + '_config.yaml'
     alpha = d_safe = mode = control_rate = prediction_horizon = ''
+    nominal_v = duration = None
     if os.path.exists(cfg_path):
         with open(cfg_path) as f:
             cfg = yaml.safe_load(f) or {}
@@ -126,6 +223,9 @@ def extract_one(bag_dir: str, contact_distance: float) -> dict:
         mode = filt.get('mode', '')
         control_rate = filt.get('control_rate', '')
         prediction_horizon = filt.get('prediction_horizon', '')
+        sc = cfg.get('scenario', {})
+        nominal_v = sc.get('robot', {}).get('cmd', {}).get('v')
+        duration = sc.get('duration')
 
     # d_safe bu bag icin bilinmiyorsa (eski kayit / config.yaml yok) DEFAULT_D_SAFE
     # kullanilir -- h_at_contact SADECE bilgilendirici bir referans esik,
@@ -136,6 +236,13 @@ def extract_one(bag_dir: str, contact_distance: float) -> dict:
     h_min = min(data['h_values']) if data['h_values'] else float('nan')
     infeasible_count = sum(1 for s in data['qp_statuses'] if s == 'infeasible')
     h_at_contact = contact_distance ** 2 - d_safe_val ** 2
+
+    pm = _path_metrics(data['odom_t'])
+    gm = _goal_metrics(data['odom_t'], pm['t0'], nominal_v, duration)
+    im = _intervention_metrics(data['cmd_actual'], data['cmd_nominal'])
+
+    def _fmt(x, nd=4):
+        return f'{x:.{nd}f}' if x == x else ''  # NaN kontrolu
 
     row = {
         'run_name': os.path.basename(bag_dir.rstrip('/').rstrip('\\')),
@@ -161,6 +268,17 @@ def extract_one(bag_dir: str, contact_distance: float) -> dict:
         'solve_time_mean_ms': (f'{sum(data["solve_times"]) / len(data["solve_times"]):.4f}'
                                 if data['solve_times'] else ''),
         'solve_time_max_ms': f'{max(data["solve_times"]):.4f}' if data['solve_times'] else '',
+        'goal_x_m': _fmt(gm['goal_x']),
+        'final_x_m': _fmt(pm['final_x']),
+        'goal_reached': gm['goal_reached'],
+        'time_to_goal_s': _fmt(gm['time_to_goal']),
+        'path_length_m': _fmt(pm['path_length']),
+        'intervention_integral': _fmt(im['integral']),
+        'intervention_max': _fmt(im['max_']),
+        'intervention_duration_s': _fmt(im['duration']),
+        'v_mean': _fmt(pm['v_mean']),
+        'v_min': _fmt(pm['v_min']),
+        'frozen': pm['frozen'],
     }
     return row
 
