@@ -1,0 +1,15 @@
+scenario:
+  name: lateral_offset_rate20
+  robot:
+    start: [0.0, 0.0, 0.0]
+    cmd: {v: 0.22, omega: 0.0}
+  obstacle:
+    start: [3.0, 0.3, 3.14159]
+    velocity: [-0.3, 0.0]
+  duration: 15.0
+  settle_time: 2.0
+filter:
+  alpha: 1.0
+  d_safe: 0.405
+  prediction_horizon: 0.0
+  control_rate: 20.0

@@ -18,6 +18,7 @@ class SafetyFilterNode(Node):
         super().__init__('safety_filter_node')
 
         self.cfg = Config()
+        self.cfg.filter.alpha = 1.0
         self.mode = Mode.REACTIVE
         self.x_r = None
         self.x_o = None
