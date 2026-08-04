@@ -121,7 +121,9 @@ class ScenarioNode(Node):
             self.pub_robot_cmd.publish(Twist())
             self.timer.cancel()
             self._stop_bag()
+            print('DEBUG: rclpy.shutdown() cagriliyor...', flush=True)
             rclpy.shutdown()
+            print(f'DEBUG: rclpy.shutdown() dondu, rclpy.ok()={rclpy.ok()}', flush=True)
 
     def _stop_bag(self) -> None:
         self.bag_proc.terminate()
@@ -141,7 +143,12 @@ def main():
     # her zaman hemen fark etmiyor (surec asilı kaliyor, PID canli kaliyor).
     # spin_once + rclpy.ok() dongusu her iterasyonda taze kontrol eder.
     while rclpy.ok():
-        rclpy.spin_once(node, timeout_sec=0.1)
+        try:
+            rclpy.spin_once(node, timeout_sec=0.1)
+        except Exception as e:
+            print(f'DEBUG: spin_once istisnasi: {e!r}', flush=True)
+            break
+    print(f'DEBUG: while dongusu bitti, os._exit(0) cagriliyor', flush=True)
     # node.destroy_node() BILEREK cagrilmiyor: context zaten shutdown()
     # edildikten sonra destroy_node()'un kendisi rmw_fastrtps discovery
     # thread'leriyle iletisime gecmeye calisirken futex'te asili kaliyor
