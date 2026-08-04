@@ -137,10 +137,12 @@ def main():
     config_path = sys.argv[1] if len(sys.argv) > 1 else 'configs/lateral_offset.yaml'
     bag_dir = sys.argv[2] if len(sys.argv) > 2 else None
     node = ScenarioNode(config_path, bag_dir)
-    try:
-        rclpy.spin(node)
-    except rclpy.executors.ExternalShutdownException:
-        pass
+    # rclpy.spin(node) bir timer callback'i icinden gelen rclpy.shutdown()'i
+    # her zaman hemen fark etmiyor (surec asilı kaliyor, PID canli kaliyor).
+    # spin_once + rclpy.ok() dongusu her iterasyonda taze kontrol eder.
+    while rclpy.ok():
+        rclpy.spin_once(node, timeout_sec=0.1)
+    node.destroy_node()
 
 
 if __name__ == '__main__':
