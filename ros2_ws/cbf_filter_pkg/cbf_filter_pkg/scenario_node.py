@@ -73,6 +73,17 @@ class ScenarioNode(Node):
             ts = time.strftime('%Y-%m-%d_%H-%M-%S')
             bag_dir = os.path.expanduser(
                 f"~/tez_cbf/results/{sc.get('name', 'run')}_{ts}")
+
+        # Cozumlenen config'in tam bir kopyasi bag'in YANINA (icine degil --
+        # ros2 bag record zaten var olan bos bir dizini bile reddediyor)
+        # yaziliyor. Amac: kampanya boyunca configs/*.yaml dosyalari elle
+        # duzenlenebilir (nitekim bu oturumda oldu) -> metrics_extractor'in
+        # her koşunun HANGI alpha/d_safe/rate ile calistigini config
+        # dosyasinin O ANKI (belki degismis) haline degil, o koşu SIRASINDA
+        # gecerli olan degerlere gore raporlamasi gerekir.
+        with open(bag_dir + '_config.yaml', 'w') as f:
+            yaml.safe_dump(cfg, f)
+
         self.bag_proc = subprocess.Popen(
             ['ros2', 'bag', 'record', '-o', bag_dir] + BAG_TOPICS,
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
