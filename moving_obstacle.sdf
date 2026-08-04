@@ -1,0 +1,41 @@
+<?xml version="1.0"?>
+<sdf version="1.6">
+  <model name="moving_obstacle">
+    <static>false</static>
+    <link name="link">
+      <inertial>
+        <mass>1.0</mass>
+      </inertial>
+      <visual name="visual">
+        <geometry>
+          <cylinder>
+            <radius>0.25</radius>
+            <length>0.5</length>
+          </cylinder>
+        </geometry>
+        <material>
+          <ambient>1 0 0 1</ambient>
+          <diffuse>1 0 0 1</diffuse>
+        </material>
+      </visual>
+      <collision name="collision">
+        <geometry>
+          <cylinder>
+            <radius>0.25</radius>
+            <length>0.5</length>
+          </cylinder>
+        </geometry>
+      </collision>
+    </link>
+    <plugin name="obstacle_mover" filename="libgazebo_ros_planar_move.so">
+      <ros>
+        <namespace>/moving_obstacle</namespace>
+      </ros>
+      <update_rate>20</update_rate>
+      <publish_odom>true</publish_odom>
+      <odometry_topic>odom</odometry_topic>
+      <odometry_frame>odom</odometry_frame>
+      <robot_base_frame>link</robot_base_frame>
+    </plugin>
+  </model>
+</sdf>
