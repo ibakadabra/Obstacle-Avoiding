@@ -38,8 +38,8 @@ from rosidl_runtime_py.utilities import get_message
 
 CSV_FIELDS = [
     'run_name', 'bag_dir', 'n_msgs',
-    'alpha', 'd_safe', 'mode', 'control_rate', 'prediction_horizon',
-    'd_min', 'contact_distance', 'h_at_contact', 'contact',
+    'alpha', 'd_safe', 'lookahead_offset_m', 'mode', 'control_rate', 'prediction_horizon',
+    'd_min', 'd_eff_min', 'contact_distance', 'h_at_contact', 'contact',
     'margin_violation', 'penetration_depth_m',
     'qp_infeasible_count', 'qp_infeasible_any',
     'h_min',
@@ -208,11 +208,12 @@ def _intervention_metrics(cmd_actual, cmd_nominal):
     return dict(integral=integral, max_=max(mags), duration=duration)
 
 
-def extract_one(bag_dir: str, contact_distance: float) -> dict:
+def extract_one(bag_dir: str, default_contact_distance: float) -> dict:
     data = _read_bag(bag_dir)
 
     cfg_path = bag_dir.rstrip('/').rstrip('\\') + '_config.yaml'
     alpha = d_safe = mode = control_rate = prediction_horizon = ''
+    contact_distance_str = lookahead_str = ''
     nominal_v = duration = None
     if os.path.exists(cfg_path):
         with open(cfg_path) as f:
@@ -223,6 +224,12 @@ def extract_one(bag_dir: str, contact_distance: float) -> dict:
         mode = filt.get('mode', '')
         control_rate = filt.get('control_rate', '')
         prediction_horizon = filt.get('prediction_horizon', '')
+        # ISI 1 duzeltmesinden SONRAKI kosularda scenario_node bunlari
+        # filtrenin CANLI parametrelerinden yazar (bkz. scenario_node.py
+        # _get_live_filter_geometry) -- ONCEKI kosularda yok, DEFAULT'a
+        # dusulur (o zamanki gercek deger, params.py'nin O ANKI hali).
+        contact_distance_str = filt.get('contact_distance', '')
+        lookahead_str = filt.get('lookahead_offset', '')
         sc = cfg.get('scenario', {})
         nominal_v = sc.get('robot', {}).get('cmd', {}).get('v')
         duration = sc.get('duration')
@@ -231,11 +238,21 @@ def extract_one(bag_dir: str, contact_distance: float) -> dict:
     # kullanilir -- h_at_contact SADECE bilgilendirici bir referans esik,
     # margin_violation'i etkilemez (o dogrudan h_min'den geliyor).
     d_safe_val = float(d_safe) if d_safe not in ('', None) else DEFAULT_D_SAFE
+    contact_distance = (float(contact_distance_str) if contact_distance_str not in ('', None)
+                         else default_contact_distance)
 
     dmin = _d_min(data['robot_xy'], data['obstacle_xy'])
     h_min = min(data['h_values']) if data['h_values'] else float('nan')
     infeasible_count = sum(1 for s in data['qp_statuses'] if s == 'infeasible')
     h_at_contact = contact_distance ** 2 - d_safe_val ** 2
+    # d_eff_min: h_min'den geri hesaplanan, CBF'nin GERCEKTEN kisitladigi
+    # (lookahead noktasi p_eff ile engel arasindaki) mesafe -- ‖Δp‖ =
+    # sqrt(h+d_safe²). O KOSUNUN KENDI d_safe_val'i ile hesaplanir, bu
+    # yuzden d_safe zaman icinde degisse bile (Agu 2026 duzeltmesi gibi)
+    # karsilastirma bozulmaz. d_min (govde-govde) ile SISTEMATIK OLARAK
+    # FARKLIDIR -- aradaki fark robot.lookahead ofsetidir.
+    d_eff_min = ((h_min + d_safe_val ** 2) ** 0.5
+                 if h_min == h_min and (h_min + d_safe_val ** 2) >= 0 else float('nan'))
 
     pm = _path_metrics(data['odom_t'])
     gm = _goal_metrics(data['odom_t'], pm['t0'], nominal_v, duration)
@@ -250,10 +267,12 @@ def extract_one(bag_dir: str, contact_distance: float) -> dict:
         'n_msgs': data['n_msgs'],
         'alpha': alpha,
         'd_safe': d_safe,
+        'lookahead_offset_m': lookahead_str,
         'mode': mode,
         'control_rate': control_rate,
         'prediction_horizon': prediction_horizon,
         'd_min': f'{dmin:.4f}' if dmin == dmin else '',  # NaN kontrolu
+        'd_eff_min': _fmt(d_eff_min),
         'contact_distance': f'{contact_distance:.4f}',
         'h_at_contact': f'{h_at_contact:.4f}',
         'contact': int(dmin < contact_distance) if dmin == dmin else '',

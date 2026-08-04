@@ -51,7 +51,7 @@ import yaml
 from geometry_msgs.msg import Twist
 from rclpy.node import Node
 from rclpy.parameter import Parameter
-from rcl_interfaces.srv import SetParameters
+from rcl_interfaces.srv import SetParameters, GetParameters
 from std_srvs.srv import Empty
 
 OBSTACLE_SDF_PATH = '/home/tusaslab7/tez_cbf/moving_obstacle.sdf'
@@ -118,6 +118,15 @@ class ScenarioNode(Node):
         # her koşunun HANGI alpha/d_safe/rate ile calistigini config
         # dosyasinin O ANKI (belki degismis) haline degil, o koşu SIRASINDA
         # gecerli olan degerlere gore raporlamasi gerekir.
+        #
+        # d_safe/contact_distance/lookahead_offset ise YAML'da HICBIR ZAMAN
+        # gercekten set edilmiyordu (metadata idi) -- burada filtrenin CANLI
+        # parametreleriyle EZILIYOR, boylece dump her zaman o kosuda
+        # GERCEKTEN kullanilan degeri yansitir.
+        live_geom = self._get_live_filter_geometry()
+        if live_geom:
+            cfg.setdefault('filter', {}).update(live_geom)
+
         with open(bag_dir + '_config.yaml', 'w') as f:
             yaml.safe_dump(cfg, f)
 
@@ -176,6 +185,33 @@ class ScenarioNode(Node):
             if not result.successful:
                 self.get_logger().warn(f'{p.name} ayarlanamadi: {result.reason}')
         self.get_logger().info(f'Filtre parametreleri: mode={mode} alpha={alpha} t_horizon={t_horizon}')
+
+    def _get_live_filter_geometry(self) -> dict:
+        """d_safe/contact_distance/lookahead_offset'i safety_filter_node'un
+        SALT-OKUNUR parametrelerinden CANLI sorgular. Bunlar params.py
+        sabitlerinden turer ve YAML'da hic bir zaman gercekten set edilmez
+        -- amac, bag'in yanina yazilan config.yaml'in HER ZAMAN o kosuda
+        GERCEKTEN kullanilan degeri yansitmasi, YAML dosyasinin (elle
+        duzenlenebilen, potansiyel BAYAT) statik metnini degil. params.py
+        degisirse (ornegin robot_radius duzeltmesi, Agu 2026) eski bag'ler
+        kendi zamanlarindaki dogru degeri korur, yeni kosular yenisini alir
+        -- karsilastirmalar bozulmaz."""
+        client = self.create_client(GetParameters, '/safety_filter_node/get_parameters')
+        if not client.wait_for_service(timeout_sec=5.0):
+            self.get_logger().warn(
+                'safety_filter_node bulunamadi -- d_safe/contact_distance '
+                'canli sorgulanamadi, config.yaml eski/statik degeri koruyacak.')
+            return {}
+        req = GetParameters.Request()
+        req.names = ['d_safe', 'contact_distance', 'lookahead_offset']
+        future = client.call_async(req)
+        rclpy.spin_until_future_complete(self, future, timeout_sec=5.0)
+        if not future.done() or future.result() is None:
+            self.get_logger().warn('get_parameters cagrisi zaman asimina ugradi.')
+            return {}
+        values = {name: pv.double_value for name, pv in zip(req.names, future.result().values)}
+        self.get_logger().info(f'Canli filtre geometrisi: {values}')
+        return values
 
     def _reset_state(self) -> None:
         # Robotu once durdur: reset_world konumu sifirlar ama govdedeki

@@ -43,7 +43,20 @@ class FilterParams:
         return robot.radius + obs.radius
 
     def d_safe(self, robot: RobotParams, obs: ObstacleParams) -> float:
-        return self.contact_distance(robot, obs) + self.d_margin
+        # KRITIK DUZELTME (Agu 2026): CBF kisiti govde merkezini degil,
+        # LOOKAHEAD NOKTASINI (p_eff, govde merkezinden robot.lookahead=0.10m
+        # ILERIDE) korur: h>=0, ||p_eff-p_o||>=d_safe garantiler. Onceki
+        # formul (contact_distance+d_margin) bu ofseti HESABA KATMIYORDU --
+        # en kotu durumda govde, kisit hala saglanirken lookahead
+        # noktasindan robot.lookahead kadar geri kalabilir, yani temas
+        # mumkun olabilir. Dogru formul lookahead ofsetini de payin icine
+        # katar:
+        #   d_safe = contact_distance + lookahead_offset + safety_margin
+        #          = 0.3737 + 0.10 + 0.05 = 0.5237
+        # (Olcum: REACTIVE modda ham merkez-merkez d_min=0.3553 iken h_min
+        # hala ~0 civariydi -- kisit "saglaniyor" gorunurken govde zaten
+        # contact_distance=0.3737'nin altina inmisti. Bu formul o acigi kapatir.)
+        return self.contact_distance(robot, obs) + robot.lookahead + self.d_margin
 
 
 @dataclass

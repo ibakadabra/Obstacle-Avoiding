@@ -7,7 +7,7 @@ from geometry_msgs.msg import Twist
 from nav_msgs.msg import Odometry
 from std_msgs.msg import Float64, String
 from std_srvs.srv import Empty
-from rcl_interfaces.msg import SetParametersResult
+from rcl_interfaces.msg import SetParametersResult, ParameterDescriptor
 
 from cbf_filter_pkg.cbf import Mode, safety_filter
 from cbf_filter_pkg.params import Config
@@ -39,6 +39,24 @@ class SafetyFilterNode(Node):
         self.cfg.filter.alpha = self.get_parameter('alpha').value
         self.cfg.filter.T_horizon = self.get_parameter('t_horizon').value
         self.add_on_set_parameters_callback(self.on_param_change)
+
+        # d_safe/contact_distance/lookahead_offset: SALT-OKUNUR bilgi
+        # parametreleri (robot.radius/obstacle.radius/robot.lookahead/
+        # d_margin gibi params.py sabitlerinden turer, calisma zamaninda
+        # DEGISMEZ). scenario_node her kosu oncesi bunlari canli SORGULAYIP
+        # bag'in yanindaki config.yaml'a YAZAR -- boylece kaydedilen deger
+        # YAML dosyasindaki (potansiyel BAYAT) metne degil, o an filtrenin
+        # GERCEKTEN kullandigi degere dayanir. params.py degisirse (ornegin
+        # robot_radius duzeltmesi) eski bag'ler kendi kaydettikleri eski
+        # degerle dogru kalir, yeni kosular yeni degerle -- karsilastirma
+        # bozulmaz.
+        ro = ParameterDescriptor(read_only=True)
+        self.declare_parameter(
+            'd_safe', self.cfg.filter.d_safe(self.cfg.robot, self.cfg.obstacle), ro)
+        self.declare_parameter(
+            'contact_distance',
+            self.cfg.filter.contact_distance(self.cfg.robot, self.cfg.obstacle), ro)
+        self.declare_parameter('lookahead_offset', self.cfg.robot.lookahead, ro)
 
         self.sub_odom = self.create_subscription(
             Odometry, '/odom', self.on_odom, 10)
