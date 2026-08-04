@@ -7,6 +7,7 @@ from geometry_msgs.msg import Twist
 from nav_msgs.msg import Odometry
 from std_msgs.msg import Float64, String
 from std_srvs.srv import Empty
+from rcl_interfaces.msg import SetParametersResult
 
 from cbf_filter_pkg.cbf import Mode, safety_filter
 from cbf_filter_pkg.params import Config
@@ -22,10 +23,22 @@ class SafetyFilterNode(Node):
         super().__init__('safety_filter_node')
 
         self.cfg = Config()
-        self.cfg.filter.alpha = 1.0
-        self.mode = Mode.REACTIVE
         self.x_r = None
         self.x_o = None
+
+        # mode/alpha/T_horizon artik ROS parametreleri: daha once koda gomulu
+        # (Mode.REACTIVE, alpha=1.0 hardcoded) idi, YAML config'lerdeki
+        # filter.mode/alpha/prediction_horizon SADECE metrics_extractor icin
+        # metadata olarak kaydediliyordu, filtreyi GERCEKTEN etkilemiyordu.
+        # scenario_node artik her kosu oncesi standart /safety_filter_node/
+        # set_parameters servisiyle bunlari YAML'daki degerlere gore ayarliyor.
+        self.declare_parameter('mode', 'REACTIVE')
+        self.declare_parameter('alpha', 1.0)
+        self.declare_parameter('t_horizon', 0.0)
+        self.mode = Mode[self.get_parameter('mode').value]
+        self.cfg.filter.alpha = self.get_parameter('alpha').value
+        self.cfg.filter.T_horizon = self.get_parameter('t_horizon').value
+        self.add_on_set_parameters_callback(self.on_param_change)
 
         self.sub_odom = self.create_subscription(
             Odometry, '/odom', self.on_odom, 10)
@@ -55,6 +68,20 @@ class SafetyFilterNode(Node):
             Empty, '/safety_filter/reset', self.on_reset)
 
         self.get_logger().info('CBF safety filter node basladi (gercek engel modu)')
+
+    def on_param_change(self, params):
+        for p in params:
+            if p.name == 'mode':
+                if p.value not in Mode.__members__:
+                    return SetParametersResult(
+                        successful=False,
+                        reason=f'gecersiz mode: {p.value} (secenekler: {list(Mode.__members__)})')
+                self.mode = Mode[p.value]
+            elif p.name == 'alpha':
+                self.cfg.filter.alpha = p.value
+            elif p.name == 't_horizon':
+                self.cfg.filter.T_horizon = p.value
+        return SetParametersResult(successful=True)
 
     def on_reset(self, request, response):
         self.x_r = None

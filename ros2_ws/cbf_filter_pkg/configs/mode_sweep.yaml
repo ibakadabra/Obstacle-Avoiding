@@ -1,0 +1,27 @@
+# Mod taramasi: control_rate_sweep.yaml'in bulgusunun (ZOH DEGIL, REACTIVE
+# modun -2*delta_p.v_o terimini atlamasi) dogrudan testi.
+#
+# alpha 1.0'da SABIT (spec'in kurali, control_rate teshisinden devraliniyor).
+# prediction_horizon=0.5s SABIT tutuluyor: REACTIVE/DCBF bu degeri kullanmiyor
+# (zararsiz), SHIFT icin ise anlamli bir T_horizon vermek gerekiyor -- 0.0
+# olsaydi SHIFT, REACTIVE ile ozdes davranirdi (cbf.py'nin kendi tanimi geregi).
+scenario:
+  name: mode_sweep
+  robot:
+    start: [0.0, 0.0, 0.0]
+    cmd: {v: 0.22, omega: 0.0}
+  obstacle:
+    start: [3.0, 0.3, 3.14159]
+    velocity: [-0.3, 0.0]
+  duration: 15.0
+  settle_time: 2.0
+filter:
+  alpha: 1.0
+  d_safe: 0.405
+  prediction_horizon: 0.5
+  control_rate: 20.0
+  mode: REACTIVE   # sweep tarafindan ezilir
+
+sweep:
+  filter.mode: [REACTIVE, DCBF, SHIFT]
+runs_per_cell: 10
