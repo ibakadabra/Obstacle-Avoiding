@@ -12,6 +12,7 @@
   <depend>nav_msgs</depend>
   <depend>sensor_msgs</depend>
   <depend>std_msgs</depend>
+  <depend>std_srvs</depend>
   <depend>rosbag2_py</depend>
   <depend>rosidl_runtime_py</depend>
 

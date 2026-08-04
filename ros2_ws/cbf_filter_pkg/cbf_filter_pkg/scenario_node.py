@@ -14,15 +14,27 @@ v1 kısıtları (bilinçli, sonraki önceliklerde genişleyecek):
 (h_value, qp_status, qp_solve_time_ms, cmd_vel_nominal) olmadan sonuç
 bag'inden h(x)/QP durumu analiz edilemezdi.
 
-Öncelik 5 (bu sürüm): her koşu Gazebo'yu TAMAMEN öldürüp yeniden başlatarak
-robotu orijine sıfırlar. /gazebo/set_entity_state bu kurulumda YOK (sadece
-init/factory/force_system eklentileri yüklü), bu yüzden ucuz bir "robotu
-geri sür" alternatifi yerine kesin ama pahalı (~run başına birkaç saniye)
-tam yeniden başlatma seçildi -- metrics_extractor'da (Öncelik 4) d_min/h_min
-degerlerinin ard arda kosularda MONOTON ARTTIGI (robotun hic sifirlanmadigi)
-gözlemiyle dogrulanan gercek bir kirlenme sorununu cozer. Engel konumu
-sil+yeniden-oluştur ile ayarlanıyor (Gazebo restart sonrasi da gecerli
-kanıtlanmış yöntem).
+Öncelik 5 (bu sürüm): her koşu başında dünya /reset_world ile sıfırlanır,
+böylece robot orijine döner. Çözülen gerçek sorun: metrics_extractor'da
+(Öncelik 4) ard arda koşuların d_min/h_min değerleri MONOTON ARTIYORDU --
+robot hiç sıfırlanmadığı için her koşuya bir öncekinin bittiği yerden
+başlıyor, engelden gitgide uzaklaşıyordu (7 koşuda d_min 0.36 -> 16.5 m).
+
+Neden /reset_world (ölçülmüş karşılaştırma):
+  - /gazebo/set_entity_state bu kurulumda YOK, ama /reset_world VAR
+    (gazebo_ros_init eklentisi) -- ilk teşhiste sadece set_entity_state'e
+    bakılıp bu atlanmıştı.
+  - Ölçüldü: 0.37 s, sıfırlama hassasiyeti ~5e-5 m (yerleşme sonrası).
+  - Denenen ve TERK EDİLEN alternatif: Gazebo'yu her koşuda pkill+yeniden
+    başlatmak. Hem pahalı (~10-30 s/koşu, 640 koşuda saatler), hem de
+    TEHLİKELİ: `pkill -f turtlebot3_gazebo` tmux SUNUCUSUNUN kendi komut
+    satırıyla eşleşti (sunucu ilk kez o komutu içeren oturumla doğmuştu)
+    ve tüm düzeneği (Gazebo + filtre node'u + senaryo) tek seferde öldürdü.
+    Bu dosyada bir daha pkill KULLANILMAMALI.
+
+Engel konumu sil+yeniden-oluştur ile ayarlanıyor (kanıtlanmış yöntem);
+reset_world engeli de başlangıç noktasına döndürür ama biz yine de
+yeniden oluşturuyoruz, çünkü başlangıç konumu senaryodan senaryoya değişir.
 
 Kullanım:
     ros2 run cbf_filter_pkg scenario_node <config.yaml> [bag_output_dir]
@@ -38,10 +50,9 @@ import rclpy
 import yaml
 from geometry_msgs.msg import Twist
 from rclpy.node import Node
+from std_srvs.srv import Empty
 
 OBSTACLE_SDF_PATH = '/home/tusaslab7/tez_cbf/moving_obstacle.sdf'
-GAZEBO_LAUNCH_CMD = ['ros2', 'launch', 'turtlebot3_gazebo', 'empty_world.launch.py']
-GAZEBO_KILL_PATTERNS = ['gzserver', 'gzclient', 'turtlebot3_gazebo']
 
 BAG_TOPICS = [
     '/odom',
@@ -64,8 +75,6 @@ class ScenarioNode(Node):
 
         self.done = False
 
-        self._restart_gazebo()
-
         self.robot_cmd = np.array([sc['robot']['cmd']['v'], sc['robot']['cmd']['omega']])
         self.obstacle_vel = np.array(sc['obstacle']['velocity'])
         self.duration = float(sc['duration'])
@@ -74,6 +83,10 @@ class ScenarioNode(Node):
 
         self.pub_robot_cmd = self.create_publisher(Twist, '/cmd_vel_nom', 10)
         self.pub_obstacle_cmd = self.create_publisher(Twist, '/moving_obstacle/cmd_vel', 10)
+
+        # Oncelik 5: dunya + filtre ic durumu sifirlanir. Engel yeniden
+        # olusturulmadan ONCE yapilir (reset_world engeli de tasir).
+        self._reset_state()
 
         obs_start = sc['obstacle']['start']
         self.get_logger().info(f'Engel yeniden konumlandiriliyor: {obs_start}')
@@ -112,37 +125,38 @@ class ScenarioNode(Node):
 
         self.timer = self.create_timer(1.0 / self.rate_hz, self._tick)
 
-    def _restart_gazebo(self) -> None:
-        self.get_logger().info(
-            'Gazebo tamamen yeniden baslatiliyor (Oncelik 5: robot pozisyonu '
-            'sifirlama -- /gazebo/set_entity_state bu kurulumda yok).')
-        for pattern in GAZEBO_KILL_PATTERNS:
-            subprocess.run(['pkill', '-9', '-f', pattern], capture_output=True)
-        time.sleep(2.0)
+    def _call_empty_service(self, name: str, timeout: float = 10.0) -> bool:
+        """std_srvs/Empty servisini cagirir. __init__ icinden guvenli:
+        spin_until_future_complete BURADA bir callback'in icinde DEGIL."""
+        client = self.create_client(Empty, name)
+        if not client.wait_for_service(timeout_sec=timeout):
+            self.get_logger().warn(f'{name} servisi {timeout:.0f}s icinde bulunamadi.')
+            return False
+        future = client.call_async(Empty.Request())
+        rclpy.spin_until_future_complete(self, future, timeout_sec=timeout)
+        if not future.done():
+            self.get_logger().warn(f'{name} cagrisi zaman asimina ugradi.')
+            return False
+        return True
 
-        env = dict(os.environ)
-        env.setdefault('TURTLEBOT3_MODEL', 'burger')
-        # detach: parent (bu node) kisa omurlu, Gazebo run boyunca ve
-        # sonrasinda BAGIMSIZ yasamali (bir sonraki kosu zaten pkill+relaunch
-        # yapacak, o yuzden burada ozel bir kapatma/join mantigina gerek yok).
-        self.gz_proc = subprocess.Popen(
-            GAZEBO_LAUNCH_CMD, env=env,
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-            start_new_session=True)
+    def _reset_state(self) -> None:
+        # Robotu once durdur: reset_world konumu sifirlar ama govdedeki
+        # artik hiz sifirlanmadan reset yapilirsa robot orijinden birkac cm
+        # kayarak duruyor (olculdu: ~2.8 cm). Sifir komut + kisa bekleme
+        # ile bu kalinti ~5e-5 m'ye iniyor.
+        self.pub_robot_cmd.publish(Twist())
+        time.sleep(0.5)
 
-        self._wait_for_odom(timeout=30.0)
+        if self._call_empty_service('/reset_world'):
+            self.get_logger().info('Dunya sifirlandi (/reset_world).')
 
-    def _wait_for_odom(self, timeout: float) -> None:
-        deadline = time.time() + timeout
-        while time.time() < deadline:
-            if self.count_publishers('/odom') > 0:
-                time.sleep(1.5)  # fizik motorunun ve TF'in oturmasi icin ek pay
-                self.get_logger().info('Gazebo hazir (/odom yayinlaniyor).')
-                return
-            time.sleep(0.5)
-        self.get_logger().warn(
-            f'/odom {timeout:.0f}s icinde gorunmedi, yine de devam ediliyor '
-            '(Gazebo baslatma basarisiz olmus olabilir).')
+        # Filtre node'unun IC durumu (son bilinen robot/engel pozu) ayri bir
+        # sey: reset_world onu temizlemez, onceki koşunun bayat pozisyonlari
+        # yeni koşunun ilk tick'lerine sizabilir.
+        if self._call_empty_service('/safety_filter/reset', timeout=3.0):
+            self.get_logger().info('Filtre ic durumu sifirlandi.')
+
+        time.sleep(1.0)  # fizik motorunun oturmasi icin
 
     def _respawn_obstacle(self, start) -> None:
         subprocess.run(

@@ -6,6 +6,7 @@ from rclpy.node import Node
 from geometry_msgs.msg import Twist
 from nav_msgs.msg import Odometry
 from std_msgs.msg import Float64, String
+from std_srvs.srv import Empty
 
 from cbf_filter_pkg.cbf import Mode, safety_filter
 from cbf_filter_pkg.params import Config
@@ -45,7 +46,21 @@ class SafetyFilterNode(Node):
         self.pub_cmd_nominal = self.create_publisher(
             Twist, '/safety_filter/cmd_vel_nominal', 10)
 
+        # Oncelik 5: kosular arasi temiz durum. Filtre node'u kampanya boyunca
+        # AYAKTA KALIYOR (her kosuda yeniden baslatilmiyor), bu yuzden onceki
+        # kosunun son robot/engel pozu yeni kosunun ilk tick'lerine sizabilir
+        # -- ozellikle engel silinip yeniden olusturulurken /moving_obstacle/odom
+        # bir sure yayin yapmadigi icin x_o bayat kalir ve h(x) yanlis hesaplanir.
+        self.srv_reset = self.create_service(
+            Empty, '/safety_filter/reset', self.on_reset)
+
         self.get_logger().info('CBF safety filter node basladi (gercek engel modu)')
+
+    def on_reset(self, request, response):
+        self.x_r = None
+        self.x_o = None
+        self.get_logger().info('Ic durum sifirlandi (x_r, x_o = None).')
+        return response
 
     def on_odom(self, msg: Odometry):
         px = msg.pose.pose.position.x
