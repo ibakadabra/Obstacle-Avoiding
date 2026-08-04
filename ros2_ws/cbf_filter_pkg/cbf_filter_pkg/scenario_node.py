@@ -142,12 +142,13 @@ def main():
     # spin_once + rclpy.ok() dongusu her iterasyonda taze kontrol eder.
     while rclpy.ok():
         rclpy.spin_once(node, timeout_sec=0.1)
-    node.destroy_node()
-    # rclpy/DDS (rmw_fastrtps) discovery thread'leri destroy_node()/shutdown()
-    # sonrasinda da kendiliginden katilmiyor (bilinen sorun) -> ~20 non-daemon
-    # thread surec cikisini sonsuza kadar engelliyor. Butun temizlik (bag
-    # durdurma, node destroy) zaten tamamlandigi icin process'i zorla kapatmak
-    # guvenli.
+    # node.destroy_node() BILEREK cagrilmiyor: context zaten shutdown()
+    # edildikten sonra destroy_node()'un kendisi rmw_fastrtps discovery
+    # thread'leriyle iletisime gecmeye calisirken futex'te asili kaliyor
+    # (py-spy ile dogrulandi, 22 non-daemon thread sonsuza kadar bekliyor).
+    # Butun onemli temizlik (bag durdurma, sifir-komut yayini) _tick()
+    # icinde zaten tamamlandi -> os._exit() ile isletim sistemi seviyesinde
+    # zorla kapatmak guvenli ve tek calisan cozum.
     os._exit(0)
 
 
