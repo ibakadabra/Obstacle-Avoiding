@@ -52,6 +52,14 @@ CSV_FIELDS = [
     'v_mean', 'v_min', 'frozen',
 ]
 
+# h_min bu esigin ALTINDAYSA gercek ihlal sayilir. Sifir kullanilamaz: CBF
+# dogru calistiginda robot bariyere YASLANIP h=0'da dengelenir ve QP cozucusu
+# kisiti tam sinirda saglar -> h_min ~ -1e-6 gibi kayan nokta gurultusu cikar.
+# Olculdu (statik v2, 30 kosu): h_min = -0.0000 iken robot govde mesafesi
+# 0.5934 m, yani temas mesafesinin (0.3737) cok uzaginda -- ihlal YOK.
+# 1e-4 h birimi, d_safe=0.5237 civarinda ~0.1 mm mesafeye karsilik gelir.
+MARGIN_VIOLATION_TOL = -1e-4
+
 FROZEN_V_THRESH = 0.01      # m/s   -- bu esigin altinda "durmus" sayilir
 FROZEN_MIN_DURATION = 2.0   # s     -- bu sureden uzun surerse "frozen"
 INTERVENTION_THRESH = 1e-3  # ‖u_safe-u_nom‖ bu esigin ustundeyse "mudahale aktif"
@@ -278,7 +286,8 @@ def extract_one(bag_dir: str, default_contact_distance: float) -> dict:
         'contact': int(dmin < contact_distance) if dmin == dmin else '',
         # margin_violation: DOGRUDAN h_min'den (otoriter, lookahead-noktasi
         # dahil CBF hesaplamasinin ta kendisi) -- d_min'den YENIDEN turetilmez.
-        'margin_violation': int(h_min < 0) if h_min == h_min else '',
+        # Tolerans icin bkz. MARGIN_VIOLATION_TOL (h=0'da dengelenme gurultusu).
+        'margin_violation': int(h_min < MARGIN_VIOLATION_TOL) if h_min == h_min else '',
         'penetration_depth_m': (f'{max(0.0, contact_distance - dmin):.4f}'
                                  if dmin == dmin else ''),
         'qp_infeasible_count': infeasible_count,
