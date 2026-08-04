@@ -54,6 +54,8 @@ class ScenarioNode(Node):
             cfg = yaml.safe_load(f)
         sc = cfg['scenario']
 
+        self.done = False
+
         self.robot_cmd = np.array([sc['robot']['cmd']['v'], sc['robot']['cmd']['omega']])
         self.obstacle_vel = np.array(sc['obstacle']['velocity'])
         self.duration = float(sc['duration'])
@@ -121,9 +123,14 @@ class ScenarioNode(Node):
             self.pub_robot_cmd.publish(Twist())
             self.timer.cancel()
             self._stop_bag()
-            print('DEBUG: rclpy.shutdown() cagriliyor...', flush=True)
-            rclpy.shutdown()
-            print(f'DEBUG: rclpy.shutdown() dondu, rclpy.ok()={rclpy.ok()}', flush=True)
+            # rclpy.shutdown() BURADA cagrilmiyor: spin_once()'un calistirdigi
+            # bir callback'in icinden shutdown() cagirmak executor'un kendi
+            # kendini beklemesine (deadlock) yol aciyor -> DEBUG print ile
+            # dogrulandi, "shutdown() cagriliyor" sonrasi hicbir zaman geri
+            # donmuyordu. Bunun yerine sadece bir bayrak set edilir; asil
+            # shutdown() main()'in disaridaki dongusunde (callback CIKTIKTAN
+            # SONRA) cagrilir.
+            self.done = True
 
     def _stop_bag(self) -> None:
         self.bag_proc.terminate()
@@ -139,21 +146,19 @@ def main():
     config_path = sys.argv[1] if len(sys.argv) > 1 else 'configs/lateral_offset.yaml'
     bag_dir = sys.argv[2] if len(sys.argv) > 2 else None
     node = ScenarioNode(config_path, bag_dir)
-    # rclpy.spin(node) bir timer callback'i icinden gelen rclpy.shutdown()'i
-    # her zaman hemen fark etmiyor (surec asilı kaliyor, PID canli kaliyor).
-    # spin_once + rclpy.ok() dongusu her iterasyonda taze kontrol eder.
-    while rclpy.ok():
-        try:
-            rclpy.spin_once(node, timeout_sec=0.1)
-        except Exception as e:
-            print(f'DEBUG: spin_once istisnasi: {e!r}', flush=True)
-            break
-    print(f'DEBUG: while dongusu bitti, os._exit(0) cagriliyor', flush=True)
-    # node.destroy_node() BILEREK cagrilmiyor: context zaten shutdown()
-    # edildikten sonra destroy_node()'un kendisi rmw_fastrtps discovery
-    # thread'leriyle iletisime gecmeye calisirken futex'te asili kaliyor
-    # (py-spy ile dogrulandi, 22 non-daemon thread sonsuza kadar bekliyor).
-    # Butun onemli temizlik (bag durdurma, sifir-komut yayini) _tick()
+    # node.done, _tick() callback'i icinde set edilir. rclpy.shutdown() BURADA,
+    # spin_once() cagrisi TAMAMEN DONDUKTEN SONRA (callback frame'inin disinda)
+    # cagrilir -- callback'in kendi icinden shutdown() cagirmak executor'un
+    # kendi kendini beklemesine (deadlock) yol aciyordu (DEBUG print ile
+    # dogrulandi: "shutdown() cagriliyor" sonrasi hicbir zaman geri donmedi).
+    while not node.done:
+        rclpy.spin_once(node, timeout_sec=0.1)
+    rclpy.shutdown()
+    # node.destroy_node() BILEREK cagrilmiyor: destroy_node()'un kendisi
+    # rmw_fastrtps discovery thread'leriyle iletisime gecmeye calisirken
+    # futex'te asili kaliyor (py-spy ile dogrulandi, 22 non-daemon thread
+    # sonsuza kadar bekliyor). Butun onemli temizlik (bag durdurma, sifir-
+    # komut yayini) _tick()
     # icinde zaten tamamlandi -> os._exit() ile isletim sistemi seviyesinde
     # zorla kapatmak guvenli ve tek calisan cozum.
     os._exit(0)
