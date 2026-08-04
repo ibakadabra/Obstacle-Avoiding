@@ -143,6 +143,12 @@ def main():
     while rclpy.ok():
         rclpy.spin_once(node, timeout_sec=0.1)
     node.destroy_node()
+    # rclpy/DDS (rmw_fastrtps) discovery thread'leri destroy_node()/shutdown()
+    # sonrasinda da kendiliginden katilmiyor (bilinen sorun) -> ~20 non-daemon
+    # thread surec cikisini sonsuza kadar engelliyor. Butun temizlik (bag
+    # durdurma, node destroy) zaten tamamlandigi icin process'i zorla kapatmak
+    # guvenli.
+    os._exit(0)
 
 
 if __name__ == '__main__':
