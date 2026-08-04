@@ -6,17 +6,23 @@ başlatmanın senkronizasyon garantisi VERMEDİĞİ (gözlenen gecikme: saniyele
 dakikalar) sorununu yapısal olarak çözer.
 
 v1 kısıtları (bilinçli, sonraki önceliklerde genişleyecek):
-  - /gazebo/set_entity_state servisi bu kurulumda YOK (sadece init/factory/
-    force_system eklentileri yüklü) -> robot konumu sıfırlanmıyor, Gazebo'nun
-    HER KOŞU ÖNCESİ TAZE başlatılmış olduğu varsayılıyor (dogal spawn = orijin).
-  - Engel konumu sil+yeniden-oluştur ile ayarlanıyor (kanıtlanmış yöntem).
   - Sonlanma kriteri şimdilik sadece `duration` (zaman aşımı). h(x)<0 anlık
     durdurma icin Oncelik 2'nin (/safety_filter/h_value) node icinde
     ABONE OLUNMASI gerekiyor (henuz yapilmadi, sadece disaridan kaydediliyor).
 
-Öncelik 3 (bu sürüm): her koşu rosbag2 ile kaydedilir; Öncelik 2'nin teşhis
-topic'leri (h_value, qp_status, qp_solve_time_ms, cmd_vel_nominal) olmadan
-sonuç bag'inden h(x)/QP durumu analiz edilemezdi.
+Öncelik 3: her koşu rosbag2 ile kaydedilir; Öncelik 2'nin teşhis topic'leri
+(h_value, qp_status, qp_solve_time_ms, cmd_vel_nominal) olmadan sonuç
+bag'inden h(x)/QP durumu analiz edilemezdi.
+
+Öncelik 5 (bu sürüm): her koşu Gazebo'yu TAMAMEN öldürüp yeniden başlatarak
+robotu orijine sıfırlar. /gazebo/set_entity_state bu kurulumda YOK (sadece
+init/factory/force_system eklentileri yüklü), bu yüzden ucuz bir "robotu
+geri sür" alternatifi yerine kesin ama pahalı (~run başına birkaç saniye)
+tam yeniden başlatma seçildi -- metrics_extractor'da (Öncelik 4) d_min/h_min
+degerlerinin ard arda kosularda MONOTON ARTTIGI (robotun hic sifirlanmadigi)
+gözlemiyle dogrulanan gercek bir kirlenme sorununu cozer. Engel konumu
+sil+yeniden-oluştur ile ayarlanıyor (Gazebo restart sonrasi da gecerli
+kanıtlanmış yöntem).
 
 Kullanım:
     ros2 run cbf_filter_pkg scenario_node <config.yaml> [bag_output_dir]
@@ -34,6 +40,8 @@ from geometry_msgs.msg import Twist
 from rclpy.node import Node
 
 OBSTACLE_SDF_PATH = '/home/tusaslab7/tez_cbf/moving_obstacle.sdf'
+GAZEBO_LAUNCH_CMD = ['ros2', 'launch', 'turtlebot3_gazebo', 'empty_world.launch.py']
+GAZEBO_KILL_PATTERNS = ['gzserver', 'gzclient', 'turtlebot3_gazebo']
 
 BAG_TOPICS = [
     '/odom',
@@ -55,6 +63,8 @@ class ScenarioNode(Node):
         sc = cfg['scenario']
 
         self.done = False
+
+        self._restart_gazebo()
 
         self.robot_cmd = np.array([sc['robot']['cmd']['v'], sc['robot']['cmd']['omega']])
         self.obstacle_vel = np.array(sc['obstacle']['velocity'])
@@ -101,6 +111,38 @@ class ScenarioNode(Node):
             f'robot_cmd={self.robot_cmd}  obstacle_vel={self.obstacle_vel}')
 
         self.timer = self.create_timer(1.0 / self.rate_hz, self._tick)
+
+    def _restart_gazebo(self) -> None:
+        self.get_logger().info(
+            'Gazebo tamamen yeniden baslatiliyor (Oncelik 5: robot pozisyonu '
+            'sifirlama -- /gazebo/set_entity_state bu kurulumda yok).')
+        for pattern in GAZEBO_KILL_PATTERNS:
+            subprocess.run(['pkill', '-9', '-f', pattern], capture_output=True)
+        time.sleep(2.0)
+
+        env = dict(os.environ)
+        env.setdefault('TURTLEBOT3_MODEL', 'burger')
+        # detach: parent (bu node) kisa omurlu, Gazebo run boyunca ve
+        # sonrasinda BAGIMSIZ yasamali (bir sonraki kosu zaten pkill+relaunch
+        # yapacak, o yuzden burada ozel bir kapatma/join mantigina gerek yok).
+        self.gz_proc = subprocess.Popen(
+            GAZEBO_LAUNCH_CMD, env=env,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            start_new_session=True)
+
+        self._wait_for_odom(timeout=30.0)
+
+    def _wait_for_odom(self, timeout: float) -> None:
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            if self.count_publishers('/odom') > 0:
+                time.sleep(1.5)  # fizik motorunun ve TF'in oturmasi icin ek pay
+                self.get_logger().info('Gazebo hazir (/odom yayinlaniyor).')
+                return
+            time.sleep(0.5)
+        self.get_logger().warn(
+            f'/odom {timeout:.0f}s icinde gorunmedi, yine de devam ediliyor '
+            '(Gazebo baslatma basarisiz olmus olabilir).')
 
     def _respawn_obstacle(self, start) -> None:
         subprocess.run(
