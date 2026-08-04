@@ -1,8 +1,11 @@
+import time
+
 import numpy as np
 import rclpy
 from rclpy.node import Node
 from geometry_msgs.msg import Twist
 from nav_msgs.msg import Odometry
+from std_msgs.msg import Float64, String
 
 from cbf_filter_pkg.cbf import Mode, safety_filter
 from cbf_filter_pkg.params import Config
@@ -34,6 +37,14 @@ class SafetyFilterNode(Node):
 
         self.pub = self.create_publisher(Twist, '/cmd_vel', 10)
 
+        # Teshis topic'leri (Oncelik 2, deney kosucusu spec'i)
+        self.pub_h = self.create_publisher(Float64, '/safety_filter/h_value', 10)
+        self.pub_qp_status = self.create_publisher(String, '/safety_filter/qp_status', 10)
+        self.pub_solve_time = self.create_publisher(
+            Float64, '/safety_filter/qp_solve_time_ms', 10)
+        self.pub_cmd_nominal = self.create_publisher(
+            Twist, '/safety_filter/cmd_vel_nominal', 10)
+
         self.get_logger().info('CBF safety filter node basladi (gercek engel modu)')
 
     def on_odom(self, msg: Odometry):
@@ -54,7 +65,10 @@ class SafetyFilterNode(Node):
             return
 
         u_nom = np.array([msg.linear.x, msg.angular.z])
+
+        t_start = time.perf_counter()
         u_safe, info = safety_filter(u_nom, self.x_r, self.x_o, self.mode, self.cfg)
+        solve_time_ms = (time.perf_counter() - t_start) * 1000.0
 
         self.get_logger().info(
             f'x_o={self.x_o[:2]} h={info.h:.3f} feasible={info.feasible} '
@@ -64,6 +78,20 @@ class SafetyFilterNode(Node):
         out.linear.x = float(u_safe[0])
         out.angular.z = float(u_safe[1])
         self.pub.publish(out)
+
+        self.pub_cmd_nominal.publish(msg)
+
+        h_msg = Float64()
+        h_msg.data = float(info.h)
+        self.pub_h.publish(h_msg)
+
+        status_msg = String()
+        status_msg.data = 'feasible' if info.feasible else 'infeasible'
+        self.pub_qp_status.publish(status_msg)
+
+        solve_msg = Float64()
+        solve_msg.data = float(solve_time_ms)
+        self.pub_solve_time.publish(solve_msg)
 
 
 def main():
