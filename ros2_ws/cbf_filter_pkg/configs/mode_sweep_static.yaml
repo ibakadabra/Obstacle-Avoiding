@@ -1,0 +1,32 @@
+# Referans/kontrol testi: STATIK engel (velocity=[0,0]).
+#
+# Beklenti: DCBF'nin ekledigi terim -2*delta_p.v_o; v_o=0 oldugunda bu terim
+# sifira iner ve DCBF, REACTIVE ile MATEMATIKSEL OLARAK OZDES olmali. SHIFT de
+# p_o+v_o*T = p_o (T ne olursa olsun) oldugu icin REACTIVE ile ozdes olmali.
+# Yani uc modun da h_min/d_min degerleri (rastgelelik/sayisal gurultu disinda)
+# ESIT cikmali -- hareketli-engel sonucundaki farkin GERCEKTEN engel hizindan
+# geldigini, mode'un kendisinden baska bir yan etkiden gelmedigini dogrular.
+#
+# Engel konumu: robot 0.22 m/s ile x=1.5'e ~6.8s'de ulasir, 15s sure icinde
+# rahatlikla kapsanir (hareketli senaryodaki gibi engele carpmadan gecmesi
+# beklenir, CBF aktif oldugu surece).
+scenario:
+  name: mode_sweep_static
+  robot:
+    start: [0.0, 0.0, 0.0]
+    cmd: {v: 0.22, omega: 0.0}
+  obstacle:
+    start: [1.5, 0.3, 3.14159]
+    velocity: [0.0, 0.0]
+  duration: 15.0
+  settle_time: 2.0
+filter:
+  alpha: 1.0
+  d_safe: 0.405
+  prediction_horizon: 0.5
+  control_rate: 20.0
+  mode: REACTIVE   # sweep tarafindan ezilir
+
+sweep:
+  filter.mode: [REACTIVE, DCBF, SHIFT]
+runs_per_cell: 10
