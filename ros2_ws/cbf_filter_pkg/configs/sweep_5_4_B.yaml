@@ -1,0 +1,41 @@
+# İŞ 5.4-B: 2 boyutlu yapi taramasi (hiz x yanal ofset), ana kampanya.
+# Pilotun (İŞ 5.3) bulgusu: ayrisma bandi y=0.3, v~0.8 civarinda; y=0.0
+# patolojik (relative degree, her iki mod da her zaman carpisiyor -- İŞ5.4-D
+# bunu ayrica inceledi), y=0.6 cok kolay. Bu tarama y ekseni 0.2-0.6 arasi
+# 4 noktayla, hiz ekseni 0.4-1.4 arasi 6 noktayla ayrisma egrisini cizmeyi
+# hedefliyor.
+#
+# SABIT (İŞ 5.4-A karari): cost_normalized=true, w_v=w_w=1.0 (esit agirlik,
+# w_w=0.5 ekstra fayda saglamadi), v_min=0.0 (artik guvenlik icin zorunlu
+# degil ama hafif verimlilik avantaji var), lookahead_L=0.10 (varsayilan;
+# İŞ5.4-D sadece y=0.0 patolojik durumu icin ayri incelendi).
+# control_rate=10 Hz (Kampanya 1'de etkisiz oldugu kanitlandi, buyuk
+# kampanyada hiz icin dusuruldu).
+scenario:
+  name: grid5_4B
+  robot:
+    start: [0.0, 0.0, 0.0]
+    cmd: {v: 0.22, omega: 0.0}
+  obstacle:
+    start: [3.0, 0.3, 3.14159]     # y (index 1) sweep tarafindan ezilir
+    velocity: [-0.3, 0.0]          # x-bileseni (index 0) sweep tarafindan ezilir
+  duration: 15.0
+  settle_time: 2.0
+filter:
+  alpha: 1.0
+  d_safe: 0.5237
+  prediction_horizon: 0.0
+  control_rate: 10.0
+  mode: REACTIVE   # sweep tarafindan ezilir
+  v_min: 0.0
+  cost_normalized: true
+  w_v: 1.0
+  w_w: 1.0
+  lookahead_L: 0.10
+
+sweep:
+  scenario.obstacle.velocity[0]: [-0.4, -0.6, -0.8, -1.0, -1.2, -1.4]
+  scenario.obstacle.start[1]: [0.2, 0.3, 0.45, 0.6]
+  filter.mode: [REACTIVE, DCBF]
+runs_per_cell: 10
+# 6 x 4 x 2 x 10 = 480 kosu
