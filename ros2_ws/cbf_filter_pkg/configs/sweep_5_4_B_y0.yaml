@@ -1,0 +1,43 @@
+# İŞ 5.4-B tamamlayici: y=0.0 (kafa-kafaya) noktasi ana izgaraya EKLENIYOR.
+# Sebep: 5.4-B'nin asil tasarimi y=0.0'i "patolojik, ayri incelendi" diye
+# disarida birakmisti (bkz. İŞ5.4-D). Kullanici bu noktanin da ana 2B izgara
+# (hiz x yofset) isi haritasina dahil edilmesini istedi -- boylece heatmap'te
+# bosluk kalmiyor, y=0.0'daki cokusun buyuklugu digger y degerleriyle ayni
+# olcekte gorsellestirilebiliyor.
+#
+# AYNI sabitler, AYNI hiz ekseni, sadece y SABIT 0.0 (sweep ekseni degil,
+# tek deger oldugu icin dogrudan obstacle.start'a yazildi).
+scenario:
+  name: grid5_4B_y0
+  robot:
+    start: [0.0, 0.0, 0.0]
+    cmd: {v: 0.22, omega: 0.0}   # goal_seeking oldugu icin KULLANILMAZ
+  obstacle:
+    start: [3.0, 0.0, 3.14159]     # y=0.0 SABIT
+    velocity: [-0.4, 0.0]          # x-bileseni sweep tarafindan ezilir
+  duration: 15.0
+  settle_time: 2.0
+nominal:
+  type: goal_seeking
+  goal: [4.0, 0.0]
+  k_p: 1.5
+  slowdown_radius: 0.5
+  v_max: 0.22
+  omega_max: 2.84
+filter:
+  alpha: 1.0
+  d_safe: 0.5237
+  prediction_horizon: 0.0
+  control_rate: 10.0
+  mode: REACTIVE   # sweep tarafindan ezilir
+  v_min: 0.0
+  cost_normalized: true
+  w_v: 1.0
+  w_w: 1.0
+  lookahead_L: 0.10
+
+sweep:
+  scenario.obstacle.velocity[0]: [-0.4, -0.6, -0.8, -1.0, -1.2, -1.4]
+  filter.mode: [REACTIVE, DCBF]
+runs_per_cell: 10
+# 6 x 2 x 10 = 120 kosu
