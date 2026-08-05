@@ -35,9 +35,17 @@ class SafetyFilterNode(Node):
         self.declare_parameter('mode', 'REACTIVE')
         self.declare_parameter('alpha', 1.0)
         self.declare_parameter('t_horizon', 0.0)
+        # v_min: params.py'de 0.0 hardcoded idi ("tez varsayimi, gerekirse
+        # gevset" yorumuyla) -- ROBOTIS donanim limiti DEGIL, bu projenin
+        # kendi tasarim karari. İŞ 5.2 (Ağu 2026): dusuk hizda robot
+        # bariyerde donuyor (Teshis A: L*w kacis kanali cok zayif). v_min<0
+        # izin verilirse robot geri cekilerek h'yi arttirabilir mi test
+        # ediliyor.
+        self.declare_parameter('v_min', 0.0)
         self.mode = Mode[self.get_parameter('mode').value]
         self.cfg.filter.alpha = self.get_parameter('alpha').value
         self.cfg.filter.T_horizon = self.get_parameter('t_horizon').value
+        self.cfg.robot.v_min = self.get_parameter('v_min').value
         self.add_on_set_parameters_callback(self.on_param_change)
 
         # d_safe/contact_distance/lookahead_offset: SALT-OKUNUR bilgi
@@ -99,6 +107,8 @@ class SafetyFilterNode(Node):
                 self.cfg.filter.alpha = p.value
             elif p.name == 't_horizon':
                 self.cfg.filter.T_horizon = p.value
+            elif p.name == 'v_min':
+                self.cfg.robot.v_min = p.value
         return SetParametersResult(successful=True)
 
     def on_reset(self, request, response):

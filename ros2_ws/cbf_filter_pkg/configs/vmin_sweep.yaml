@@ -1,0 +1,30 @@
+# IS 5.2: v_min karari. params.py'de v_min=0.0 hardcoded idi ("tez varsayimi,
+# gerekirse gevset" yorumuyla) -- ROBOTIS donanim limiti DEGIL. Teshis A
+# (Ağu 2026) filtre nin dusuk hizda L*w kacis kanalinin cok zayif oldugunu
+# gosterdi (lookahead kolu L=0.10m kucuk). Bu kampanya robotun GERI GITMESINE
+# izin verilirse (v_min=-0.22) donma davranisi degisiyor mu test ediyor.
+#
+# Hareketli engel 0.8 m/s secildi (0.3 m/s'den daha zorlu, statik testteki
+# "donma" davranisinin dinamik/hareketli engelde de gorulup gorulmedigini
+# ayrica test ediyor -- mode_sweep.yaml'in 0.3 m/s'i cok yavas kalabilir).
+scenario:
+  name: vmin_sweep
+  robot:
+    start: [0.0, 0.0, 0.0]
+    cmd: {v: 0.22, omega: 0.0}
+  obstacle:
+    start: [3.0, 0.3, 3.14159]
+    velocity: [-0.8, 0.0]
+  duration: 15.0
+  settle_time: 2.0
+filter:
+  alpha: 1.0
+  d_safe: 0.5237
+  prediction_horizon: 0.0
+  control_rate: 20.0
+  mode: DCBF
+  v_min: 0.0   # sweep tarafindan ezilir
+
+sweep:
+  filter.v_min: [0.0, -0.22]
+runs_per_cell: 10

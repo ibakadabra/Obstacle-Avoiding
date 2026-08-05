@@ -100,7 +100,8 @@ class ScenarioNode(Node):
         self._set_filter_params(
             mode=filt.get('mode', 'REACTIVE'),
             alpha=float(filt.get('alpha', 1.0)),
-            t_horizon=float(filt.get('prediction_horizon', 0.0)))
+            t_horizon=float(filt.get('prediction_horizon', 0.0)),
+            v_min=float(filt.get('v_min', 0.0)))
 
         obs_start = sc['obstacle']['start']
         self.get_logger().info(f'Engel yeniden konumlandiriliyor: {obs_start}')
@@ -162,11 +163,11 @@ class ScenarioNode(Node):
             return False
         return True
 
-    def _set_filter_params(self, mode: str, alpha: float, t_horizon: float) -> None:
+    def _set_filter_params(self, mode: str, alpha: float, t_horizon: float, v_min: float = 0.0) -> None:
         client = self.create_client(SetParameters, '/safety_filter_node/set_parameters')
         if not client.wait_for_service(timeout_sec=5.0):
             self.get_logger().warn(
-                'safety_filter_node bulunamadi -- mode/alpha/t_horizon eski '
+                'safety_filter_node bulunamadi -- mode/alpha/t_horizon/v_min eski '
                 'degerinde kaliyor (bu kosu METADATA ile GERCEK filtre '
                 'davranisi arasinda TUTARSIZ olabilir!).')
             return
@@ -175,6 +176,7 @@ class ScenarioNode(Node):
             Parameter('mode', Parameter.Type.STRING, mode).to_parameter_msg(),
             Parameter('alpha', Parameter.Type.DOUBLE, alpha).to_parameter_msg(),
             Parameter('t_horizon', Parameter.Type.DOUBLE, t_horizon).to_parameter_msg(),
+            Parameter('v_min', Parameter.Type.DOUBLE, v_min).to_parameter_msg(),
         ]
         future = client.call_async(req)
         rclpy.spin_until_future_complete(self, future, timeout_sec=5.0)
@@ -184,7 +186,8 @@ class ScenarioNode(Node):
         for result, p in zip(future.result().results, req.parameters):
             if not result.successful:
                 self.get_logger().warn(f'{p.name} ayarlanamadi: {result.reason}')
-        self.get_logger().info(f'Filtre parametreleri: mode={mode} alpha={alpha} t_horizon={t_horizon}')
+        self.get_logger().info(
+            f'Filtre parametreleri: mode={mode} alpha={alpha} t_horizon={t_horizon} v_min={v_min}')
 
     def _get_live_filter_geometry(self) -> dict:
         """d_safe/contact_distance/lookahead_offset'i safety_filter_node'un
