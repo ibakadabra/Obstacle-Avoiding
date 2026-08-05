@@ -101,7 +101,10 @@ class ScenarioNode(Node):
             mode=filt.get('mode', 'REACTIVE'),
             alpha=float(filt.get('alpha', 1.0)),
             t_horizon=float(filt.get('prediction_horizon', 0.0)),
-            v_min=float(filt.get('v_min', 0.0)))
+            v_min=float(filt.get('v_min', 0.0)),
+            cost_normalized=bool(filt.get('cost_normalized', False)),
+            w_v=float(filt.get('w_v', 1.0)),
+            w_w=float(filt.get('w_w', 1.0)))
 
         obs_start = sc['obstacle']['start']
         self.get_logger().info(f'Engel yeniden konumlandiriliyor: {obs_start}')
@@ -163,13 +166,14 @@ class ScenarioNode(Node):
             return False
         return True
 
-    def _set_filter_params(self, mode: str, alpha: float, t_horizon: float, v_min: float = 0.0) -> None:
+    def _set_filter_params(self, mode: str, alpha: float, t_horizon: float, v_min: float = 0.0,
+                            cost_normalized: bool = False, w_v: float = 1.0, w_w: float = 1.0) -> None:
         client = self.create_client(SetParameters, '/safety_filter_node/set_parameters')
         if not client.wait_for_service(timeout_sec=5.0):
             self.get_logger().warn(
-                'safety_filter_node bulunamadi -- mode/alpha/t_horizon/v_min eski '
-                'degerinde kaliyor (bu kosu METADATA ile GERCEK filtre '
-                'davranisi arasinda TUTARSIZ olabilir!).')
+                'safety_filter_node bulunamadi -- mode/alpha/t_horizon/v_min/cost '
+                'parametreleri eski degerinde kaliyor (bu kosu METADATA ile GERCEK '
+                'filtre davranisi arasinda TUTARSIZ olabilir!).')
             return
         req = SetParameters.Request()
         req.parameters = [
@@ -177,6 +181,9 @@ class ScenarioNode(Node):
             Parameter('alpha', Parameter.Type.DOUBLE, alpha).to_parameter_msg(),
             Parameter('t_horizon', Parameter.Type.DOUBLE, t_horizon).to_parameter_msg(),
             Parameter('v_min', Parameter.Type.DOUBLE, v_min).to_parameter_msg(),
+            Parameter('cost_normalized', Parameter.Type.BOOL, cost_normalized).to_parameter_msg(),
+            Parameter('w_v', Parameter.Type.DOUBLE, w_v).to_parameter_msg(),
+            Parameter('w_w', Parameter.Type.DOUBLE, w_w).to_parameter_msg(),
         ]
         future = client.call_async(req)
         rclpy.spin_until_future_complete(self, future, timeout_sec=5.0)
@@ -187,7 +194,8 @@ class ScenarioNode(Node):
             if not result.successful:
                 self.get_logger().warn(f'{p.name} ayarlanamadi: {result.reason}')
         self.get_logger().info(
-            f'Filtre parametreleri: mode={mode} alpha={alpha} t_horizon={t_horizon} v_min={v_min}')
+            f'Filtre parametreleri: mode={mode} alpha={alpha} t_horizon={t_horizon} '
+            f'v_min={v_min} cost_normalized={cost_normalized} w_v={w_v} w_w={w_w}')
 
     def _get_live_filter_geometry(self) -> dict:
         """d_safe/contact_distance/lookahead_offset'i safety_filter_node'un

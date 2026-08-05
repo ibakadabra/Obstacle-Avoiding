@@ -39,6 +39,7 @@ from rosidl_runtime_py.utilities import get_message
 CSV_FIELDS = [
     'run_name', 'bag_dir', 'n_msgs',
     'alpha', 'd_safe', 'lookahead_offset_m', 'v_min_param', 'mode', 'control_rate', 'prediction_horizon',
+    'cost_normalized', 'w_v', 'w_w', 'obstacle_velocity_source',
     'd_min', 'd_eff_min', 'contact_distance', 'h_at_contact', 'contact',
     'margin_violation', 'penetration_depth_m',
     'qp_infeasible_count', 'qp_infeasible_any',
@@ -49,6 +50,7 @@ CSV_FIELDS = [
     'goal_x_m', 'final_x_m', 'goal_reached', 'time_to_goal_s',
     'path_length_m',
     'intervention_integral', 'intervention_max', 'intervention_duration_s',
+    'v_intervention_integral', 'w_intervention_integral', 'omega_intervention_share',
     'v_mean', 'v_min', 'frozen',
 ]
 
@@ -197,23 +199,38 @@ def _intervention_metrics(cmd_actual, cmd_nominal):
     ile AYNI tanim: v ve w'yi tek bir Oklid normunda karistirir). cmd_actual
     ve cmd_nominal AYNI callback'ten (on_cmd_nom) art arda yayinlandigi icin
     INDEKSE gore eslestirilir (zaman damgasiyla degil -- robot/engel
-    eslestirmesindeki gibi bir belirsizlik YOK, ayni olayin iki cikisidir)."""
+    eslestirmesindeki gibi bir belirsizlik YOK, ayni olayin iki cikisidir).
+
+    İŞ 5.4-A: v_integral/w_integral AYRI ayrı da hesaplanir -- Teshis A'da
+    elle hesaplanan omega_intervention_share artik otomatik cikiyor.
+    (v_integral+w_integral) TOPLAM MUDAHALE'nin Oklid normundan (integral)
+    FARKLI bir buyukluktur (üçgen esitsizligi) -- omega_share bu ikisinin
+    orani olarak tanimlanir, integral ile degil."""
     n = min(len(cmd_actual), len(cmd_nominal))
     if n == 0:
-        return dict(integral=float('nan'), max_=float('nan'), duration=float('nan'))
-    mags, ts = [], []
+        return dict(integral=float('nan'), max_=float('nan'), duration=float('nan'),
+                     v_integral=float('nan'), w_integral=float('nan'),
+                     omega_share=float('nan'))
+    mags, dvs, dws, ts = [], [], [], []
     for i in range(n):
         t, va, wa = cmd_actual[i]
         _, vn, wn = cmd_nominal[i]
+        dvs.append(abs(va - vn))
+        dws.append(abs(wa - wn))
         mags.append(((va - vn) ** 2 + (wa - wn) ** 2) ** 0.5)
         ts.append(t)
-    integral = 0.0
+    integral = v_integral = w_integral = 0.0
     for i in range(1, n):
         dt = ts[i] - ts[i - 1]
         integral += 0.5 * (mags[i] + mags[i - 1]) * dt
+        v_integral += 0.5 * (dvs[i] + dvs[i - 1]) * dt
+        w_integral += 0.5 * (dws[i] + dws[i - 1]) * dt
     duration = sum(
         (ts[i] - ts[i - 1]) for i in range(1, n) if mags[i] > INTERVENTION_THRESH)
-    return dict(integral=integral, max_=max(mags), duration=duration)
+    denom = v_integral + w_integral
+    omega_share = (w_integral / denom) if denom > 0 else float('nan')
+    return dict(integral=integral, max_=max(mags), duration=duration,
+                v_integral=v_integral, w_integral=w_integral, omega_share=omega_share)
 
 
 def extract_one(bag_dir: str, default_contact_distance: float) -> dict:
@@ -222,6 +239,7 @@ def extract_one(bag_dir: str, default_contact_distance: float) -> dict:
     cfg_path = bag_dir.rstrip('/').rstrip('\\') + '_config.yaml'
     alpha = d_safe = v_min_param = mode = control_rate = prediction_horizon = ''
     contact_distance_str = lookahead_str = ''
+    cost_normalized = w_v = w_w = ''
     nominal_v = duration = None
     if os.path.exists(cfg_path):
         with open(cfg_path) as f:
@@ -233,6 +251,9 @@ def extract_one(bag_dir: str, default_contact_distance: float) -> dict:
         mode = filt.get('mode', '')
         control_rate = filt.get('control_rate', '')
         prediction_horizon = filt.get('prediction_horizon', '')
+        cost_normalized = filt.get('cost_normalized', False)
+        w_v = filt.get('w_v', '')
+        w_w = filt.get('w_w', '')
         # ISI 1 duzeltmesinden SONRAKI kosularda scenario_node bunlari
         # filtrenin CANLI parametrelerinden yazar (bkz. scenario_node.py
         # _get_live_filter_geometry) -- ONCEKI kosularda yok, DEFAULT'a
@@ -281,6 +302,15 @@ def extract_one(bag_dir: str, default_contact_distance: float) -> dict:
         'mode': mode,
         'control_rate': control_rate,
         'prediction_horizon': prediction_horizon,
+        'cost_normalized': int(cost_normalized) if cost_normalized != '' else '',
+        'w_v': w_v,
+        'w_w': w_w,
+        # Dogrulandi (İŞ 5.3 sonrasi, Ağu 2026): safety_filter_node.py
+        # /moving_obstacle/odom'a (Gazebo ground truth) DOGRUDAN abone,
+        # hicbir kestirim/EKF katmanindan gecmiyor. ekf.py Faz 0'dan kopya,
+        # import bile edilmiyor. Sabit deger -- gelecekte EKF baglanirsa
+        # bu satir degistirilecek.
+        'obstacle_velocity_source': 'ground_truth',
         'd_min': f'{dmin:.4f}' if dmin == dmin else '',  # NaN kontrolu
         'd_eff_min': _fmt(d_eff_min),
         'contact_distance': f'{contact_distance:.4f}',
@@ -306,6 +336,9 @@ def extract_one(bag_dir: str, default_contact_distance: float) -> dict:
         'intervention_integral': _fmt(im['integral']),
         'intervention_max': _fmt(im['max_']),
         'intervention_duration_s': _fmt(im['duration']),
+        'v_intervention_integral': _fmt(im['v_integral']),
+        'w_intervention_integral': _fmt(im['w_integral']),
+        'omega_intervention_share': _fmt(im['omega_share']),
         'v_mean': _fmt(pm['v_mean']),
         'v_min': _fmt(pm['v_min']),
         'frozen': pm['frozen'],

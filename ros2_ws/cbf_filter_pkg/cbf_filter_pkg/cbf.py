@@ -89,7 +89,19 @@ def safety_filter(
     G = dynamics.lookahead_velocity_matrix(theta, cfg.robot.lookahead)
  
     u = cp.Variable(2)
-    objective = cp.Minimize(cp.sum_squares(u - u_nom))
+    if cfg.filter.cost_normalized:
+        # İŞ 5.4-A: v ve ω'yu KENDI ARALIKLARINA gore olcekleyip agirlikli
+        # topla -- eskiden v ve w mutlak degerleriyle ayni normda
+        # karisiyordu (v araligi 0.22, w araligi 5.68 -- ~26x fark),
+        # bu da filtreyi sistematik olarak "dur" secmeye itiyordu.
+        v_range = cfg.robot.v_max - cfg.robot.v_min
+        w_range = 2.0 * cfg.robot.w_max
+        scale = np.array([1.0 / v_range, 1.0 / w_range])
+        weights = np.array([cfg.filter.w_v, cfg.filter.w_w])
+        scaled_diff = cp.multiply(scale, u - u_nom)
+        objective = cp.Minimize(cp.sum(cp.multiply(weights, cp.square(scaled_diff))))
+    else:
+        objective = cp.Minimize(cp.sum_squares(u - u_nom))
     constraints = [
         2 * delta_p @ (G @ u) + h_ek >= -cfg.filter.alpha * h,
         u[0] >= cfg.robot.v_min,

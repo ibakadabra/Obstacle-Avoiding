@@ -36,6 +36,16 @@ class FilterParams:
     alpha: float = 1.0           # CBF sınıf-K katsayısı (D2: kalibre edilecek)
     d_margin: float = 0.05       # m     (ek güvenlik marjı — safety_margin)
     T_horizon: float = 0.0       # s     (SHIFT modunda öngörü ufku; 0 = reaktif eşdeğeri)
+    # İŞ 5.4-A (Ağu 2026): QP maliyeti J=(v-v_nom)²+(ω-ω_nom)² NORMALIZE
+    # EDILMEMISTI -- v araligi 0.22 m/s, ω araligi 5.68 rad/s (~26x fark).
+    # Sonuc: tam durmak (Δv=0.22 → J=0.0484) ile 0.22 rad/s donmek (ayni J)
+    # ESIT maliyetli, ama 1.0 rad/s donmek 20x pahali -- filtre pratikte hep
+    # "dur" secip donusu es geciyordu (Teshis A: ω payi %8; İŞ2: donma
+    # 9-10/10; Teshis B: geri-hareket testi bu artefaktla kirlenmis olabilir).
+    # cost_normalized=True ise J=w_v·((v-v_nom)/v_range)²+w_w·((ω-ω_nom)/ω_range)²
+    cost_normalized: bool = False   # False = eski (normalize edilmemis) davranis
+    w_v: float = 1.0
+    w_w: float = 1.0
 
     def contact_distance(self, robot: RobotParams, obs: ObstacleParams) -> float:
         """Merkez-merkez fiziksel temas mesafesi (govde+engel yaricaplari).

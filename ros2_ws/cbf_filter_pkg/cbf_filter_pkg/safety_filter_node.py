@@ -42,10 +42,19 @@ class SafetyFilterNode(Node):
         # izin verilirse robot geri cekilerek h'yi arttirabilir mi test
         # ediliyor.
         self.declare_parameter('v_min', 0.0)
+        # İŞ 5.4-A: QP maliyeti normalize edilebilir (bkz. params.py FilterParams,
+        # cbf.py safety_filter). cost_normalized=False -> eski (normalize
+        # edilmemis) davranis, geriye donuk karsilastirma icin varsayilan.
+        self.declare_parameter('cost_normalized', False)
+        self.declare_parameter('w_v', 1.0)
+        self.declare_parameter('w_w', 1.0)
         self.mode = Mode[self.get_parameter('mode').value]
         self.cfg.filter.alpha = self.get_parameter('alpha').value
         self.cfg.filter.T_horizon = self.get_parameter('t_horizon').value
         self.cfg.robot.v_min = self.get_parameter('v_min').value
+        self.cfg.filter.cost_normalized = self.get_parameter('cost_normalized').value
+        self.cfg.filter.w_v = self.get_parameter('w_v').value
+        self.cfg.filter.w_w = self.get_parameter('w_w').value
         self.add_on_set_parameters_callback(self.on_param_change)
 
         # d_safe/contact_distance/lookahead_offset: SALT-OKUNUR bilgi
@@ -109,6 +118,12 @@ class SafetyFilterNode(Node):
                 self.cfg.filter.T_horizon = p.value
             elif p.name == 'v_min':
                 self.cfg.robot.v_min = p.value
+            elif p.name == 'cost_normalized':
+                self.cfg.filter.cost_normalized = p.value
+            elif p.name == 'w_v':
+                self.cfg.filter.w_v = p.value
+            elif p.name == 'w_w':
+                self.cfg.filter.w_w = p.value
         return SetParametersResult(successful=True)
 
     def on_reset(self, request, response):
