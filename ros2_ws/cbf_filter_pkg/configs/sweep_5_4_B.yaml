@@ -15,12 +15,19 @@ scenario:
   name: grid5_4B
   robot:
     start: [0.0, 0.0, 0.0]
-    cmd: {v: 0.22, omega: 0.0}
+    cmd: {v: 0.22, omega: 0.0}   # goal_seeking oldugu icin KULLANILMAZ
   obstacle:
     start: [3.0, 0.3, 3.14159]     # y (index 1) sweep tarafindan ezilir
     velocity: [-0.3, 0.0]          # x-bileseni (index 0) sweep tarafindan ezilir
   duration: 15.0
   settle_time: 2.0
+nominal:
+  type: goal_seeking
+  goal: [4.0, 0.0]
+  k_p: 1.5
+  slowdown_radius: 0.5
+  v_max: 0.22
+  omega_max: 2.84
 filter:
   alpha: 1.0
   d_safe: 0.5237
