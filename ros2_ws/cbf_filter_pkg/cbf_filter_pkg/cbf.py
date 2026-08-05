@@ -1,9 +1,23 @@
 """
-Üç mod, TEK fark h ve ḣ'nin nasıl kurulduğu:
+Dört mod, TEK fark h ve ḣ'nin nasıl kurulduğu:
 
-  REACTIVE : engel statik varsayılır  → ∂h/∂t terimi YOK
-  DCBF     : zamanla değişen CBF      → ḣ'ye engel hız terimi (-2Δpᵀ·v_o) eklenir
-  SHIFT    : engel konumu T ileri kaydırılır (p_o + v_o·T), sonra REACTIVE gibi
+  REACTIVE      : engel statik varsayılır  → ∂h/∂t terimi YOK
+  DCBF          : zamanla değişen CBF      → ḣ'ye engel hız terimi (-2Δpᵀ·v_o) eklenir
+  SHIFT         : engel konumu T ileri kaydırılır (p_o + v_o·T), sonra REACTIVE gibi
+                  -- NAİF: Δp kaydırılmış noktaya göre hesaplanır ama ḣ'ye HİÇBİR
+                  hız terimi eklenmez. Bu MATEMATİKSEL OLARAK EKSİK bir türev
+                  (İŞ 4, Ağu 2026 -- "Sonraki Adımlar" spec'i): p_obs_eff = p_o+v_o·T
+                  zamanla hareket ediyor (p_obs_eff_dot = v_o, v_o sabit varsayımıyla),
+                  o yüzden Δp_dot = p_eff_dot − v_o olmalı, ama kod bunu atlıyor.
+                  SADECE KARŞILAŞTIRMA AMACIYLA tutuluyor (SHIFT_CORRECT ile).
+  SHIFT_CORRECT : SHIFT ile AYNI kaydırılmış Δp, ama DOĞRU türev:
+                  Δp_dot = p_eff_dot − p_obs_eff_dot = G·u − v_o
+                  ḣ = 2·Δp·(G·u − v_o) = 2·Δp·G·u − 2·Δp·v_o
+                  Yani h_ek formu DCBF'le AYNI (-2·Δp·v_o), farkı Δp'nin
+                  kaydırılmış noktaya göre hesaplanması. T_horizon=0 iken
+                  p_obs_eff DCBF'inkiyle özdeşleşir -> SHIFT_CORRECT ve DCBF
+                  matematiksel olarak AYNI QP'ye indirgenir (tutarlılık kontrolü,
+                  kodun yapısından otomatik sağlanır).
 
 QP (lookahead formülasyonu, D1 kararına kadar):
 
@@ -25,7 +39,8 @@ import cvxpy as cp
 class Mode(Enum):
     REACTIVE = auto()
     DCBF = auto()
-    SHIFT = auto()
+    SHIFT = auto()          # NAİF -- bkz. modül docstring'i, İŞ 4
+    SHIFT_CORRECT = auto()  # doğru türev -- bkz. modül docstring'i, İŞ 4
 
 
 @dataclass
@@ -52,17 +67,20 @@ def safety_filter(
     cfg: Config) -> tuple[np.ndarray, FilterInfo]:
     
     p_eff = dynamics.lookahead_point(x_r, cfg.robot.lookahead)
-    if mode == Mode.SHIFT:
+    if mode in (Mode.SHIFT, Mode.SHIFT_CORRECT):
       p_obs_eff = np.array([
         x_o[0] + x_o[2] * cfg.filter.T_horizon,
         x_o[1] + x_o[3] * cfg.filter.T_horizon
     ])
     else:
         p_obs_eff = x_o[:2]
-    delta_p = p_eff - p_obs_eff 
-    if mode == Mode.DCBF:
-        h_ek = -2 * delta_p @ x_o[2:]  
-    else: 
+    delta_p = p_eff - p_obs_eff
+    if mode in (Mode.DCBF, Mode.SHIFT_CORRECT):
+        # DCBF: delta_p kaydirilmamis nokta uzerinden (p_obs_eff=x_o[:2]).
+        # SHIFT_CORRECT: delta_p KAYDIRILMIS nokta uzerinden (yukarida
+        # hesaplandi) -- ayni formul, farkli Δp girdisi.
+        h_ek = -2 * delta_p @ x_o[2:]
+    else:
         h_ek = 0.0
   
     d_safe = cfg.filter.d_safe(cfg.robot, cfg.obstacle)
