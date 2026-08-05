@@ -173,14 +173,42 @@ def _path_metrics(odom_t):
                 frozen=frozen, final_x=final_x, t0=t0)
 
 
-def _goal_metrics(odom_t, t0, nominal_v, duration):
-    """goal_x: engel olmasaydi kat edilecek nominal mesafe (duz cizgi varsayimi,
-    senaryolarda omega_nom=0 oldugu icin gecerli). goal_reached: robot bu
-    mesafenin >= GOAL_FRACTION'ina ulasti mi. time_to_goal: ilk ulasma ani
-    (ilk /odom mesajina gore GORECELI zaman -- t0 senaryonun gercek
-    sifiri degil, bag'deki ilk odom ornegi; settle_time kadar sistematik
-    bir kaymasi olabilir, bu YAKLASIKTIR)."""
-    if nominal_v is None or duration is None or not odom_t:
+def _goal_metrics(odom_t, t0, nominal_v, duration, goal_xy=None):
+    """İŞ 5.4-B on kosulu 1 (Ağu 2026): iki farkli nominal tipi icin iki
+    farkli hedef tanimi.
+    - goal_xy verilmisse (nominal.type='goal_seeking'): hedef SABIT bir
+      (x,y) noktasi, ulasma Oklid mesafesiyle olculur (robot donup
+      dolasabilir, sadece x ilerlemesi yeterli degil).
+    - goal_xy YOKSA (eski 'constant' nominal, geriye donuk uyumluluk):
+      goal_x = nominal_v*duration duz-cizgi varsayimi, sadece x ilerlemesi
+      olculur (omega_nom=0 oldugu icin o zaman gecerliydi).
+    time_to_goal: ilk /odom mesajina gore GORECELI zaman (bag'deki ilk
+    ornek, senaryonun gercek t0'i degil; settle_time kadar sistematik
+    kayma olabilir, YAKLASIKTIR)."""
+    if not odom_t:
+        return dict(goal_x=float('nan'), goal_reached='', time_to_goal=float('nan'))
+
+    if goal_xy is not None:
+        gx, gy = goal_xy
+        goal_x = gx  # rapor/CSV'de 'goal_x_m' sutunu icin (y ayri tutulmuyor)
+        threshold = GOAL_FRACTION  # Oklid mesafesi icin ayrica esik ASAGIDA
+        # "ulasti" tanimi: baslangic-hedef mesafesinin (GOAL_FRACTION)'ini
+        # kat etmis olmak DEGIL, kalan mesafe baslangic mesafesinin
+        # (1-GOAL_FRACTION)'i kadar KALMIS olmak -- yani hedefe yeterince
+        # yaklasmis olmak.
+        x0, y0 = odom_t[0][1], odom_t[0][2]
+        start_dist = ((gx - x0) ** 2 + (gy - y0) ** 2) ** 0.5
+        tol = (1.0 - GOAL_FRACTION) * start_dist
+        time_to_goal = float('nan')
+        reached = 0
+        for t, x, y, _ in odom_t:
+            if ((gx - x) ** 2 + (gy - y) ** 2) ** 0.5 <= tol:
+                reached = 1
+                time_to_goal = t - t0
+                break
+        return dict(goal_x=goal_x, goal_reached=reached, time_to_goal=time_to_goal)
+
+    if nominal_v is None or duration is None:
         return dict(goal_x=float('nan'), goal_reached='', time_to_goal=float('nan'))
     goal_x = nominal_v * duration
     threshold_x = GOAL_FRACTION * goal_x
@@ -240,7 +268,7 @@ def extract_one(bag_dir: str, default_contact_distance: float) -> dict:
     alpha = d_safe = v_min_param = mode = control_rate = prediction_horizon = ''
     contact_distance_str = lookahead_str = ''
     cost_normalized = w_v = w_w = ''
-    nominal_v = duration = None
+    nominal_v = duration = goal_xy = None
     if os.path.exists(cfg_path):
         with open(cfg_path) as f:
             cfg = yaml.safe_load(f) or {}
@@ -263,6 +291,8 @@ def extract_one(bag_dir: str, default_contact_distance: float) -> dict:
         sc = cfg.get('scenario', {})
         nominal_v = sc.get('robot', {}).get('cmd', {}).get('v')
         duration = sc.get('duration')
+        nominal_block = cfg.get('nominal', {'type': 'constant'})
+        goal_xy = tuple(nominal_block['goal']) if nominal_block.get('type') == 'goal_seeking' else None
 
     # d_safe bu bag icin bilinmiyorsa (eski kayit / config.yaml yok) DEFAULT_D_SAFE
     # kullanilir -- h_at_contact SADECE bilgilendirici bir referans esik,
@@ -285,7 +315,7 @@ def extract_one(bag_dir: str, default_contact_distance: float) -> dict:
                  if h_min == h_min and (h_min + d_safe_val ** 2) >= 0 else float('nan'))
 
     pm = _path_metrics(data['odom_t'])
-    gm = _goal_metrics(data['odom_t'], pm['t0'], nominal_v, duration)
+    gm = _goal_metrics(data['odom_t'], pm['t0'], nominal_v, duration, goal_xy)
     im = _intervention_metrics(data['cmd_actual'], data['cmd_nominal'])
 
     def _fmt(x, nd=4):

@@ -49,6 +49,8 @@ import numpy as np
 import rclpy
 import yaml
 from geometry_msgs.msg import Twist
+from nav_msgs.msg import Odometry
+from cbf_filter_pkg import nominal_controller as nomctl
 from rclpy.node import Node
 from rclpy.parameter import Parameter
 from rcl_interfaces.srv import SetParameters
@@ -83,6 +85,15 @@ class ScenarioNode(Node):
         self.duration = float(sc['duration'])
         self.rate_hz = float(cfg.get('filter', {}).get('control_rate', 20.0))
         settle_time = float(sc.get('settle_time', 2.0))
+
+        # İŞ 5.4-B on kosulu 1 (Ağu 2026): nominal.type='goal_seeking' ise
+        # sabit komut yerine engelden HABERSIZ, sadece hedefe donen oransal
+        # kontrolcu kullanilir (nominal_controller.py). Varsayilan 'constant'
+        # ESKI davranisla TAM UYUMLU (geriye donuk karsilastirma icin).
+        self.nominal_cfg = cfg.get('nominal', {'type': 'constant'})
+        self.x_r = None  # /odom'dan gelen [x,y,theta], sadece goal_seeking icin
+        if self.nominal_cfg.get('type') == 'goal_seeking':
+            self.sub_odom = self.create_subscription(Odometry, '/odom', self._on_odom, 10)
 
         self.pub_robot_cmd = self.create_publisher(Twist, '/cmd_vel_nom', 10)
         self.pub_obstacle_cmd = self.create_publisher(Twist, '/moving_obstacle/cmd_vel', 10)
@@ -244,12 +255,35 @@ class ScenarioNode(Node):
              '-x', str(start[0]), '-y', str(start[1]), '-z', '0.25'],
             capture_output=True, timeout=15)
 
+    def _on_odom(self, msg: Odometry) -> None:
+        p = msg.pose.pose.position
+        q = msg.pose.pose.orientation
+        theta = np.arctan2(2.0 * (q.w * q.z + q.x * q.y), 1.0 - 2.0 * (q.y * q.y + q.z * q.z))
+        self.x_r = np.array([p.x, p.y, theta])
+
+    def _nominal_cmd(self) -> np.ndarray:
+        """goal_seeking: engelden HABERSIZ, sadece /odom + sabit hedeften
+        hesaplanir. constant (varsayilan): eski sabit komut."""
+        if self.nominal_cfg.get('type') != 'goal_seeking':
+            return self.robot_cmd
+        if self.x_r is None:
+            return np.array([0.0, 0.0])  # /odom henuz gelmedi, guvenli varsayilan
+        gx, gy = self.nominal_cfg['goal']
+        v_nom, w_nom = nomctl.goal_seeking_nominal(
+            self.x_r[0], self.x_r[1], self.x_r[2], gx, gy,
+            k_p=float(self.nominal_cfg.get('k_p', 1.5)),
+            slowdown_radius=float(self.nominal_cfg.get('slowdown_radius', 0.5)),
+            v_max=float(self.nominal_cfg.get('v_max', 0.22)),
+            omega_max=float(self.nominal_cfg.get('omega_max', 2.84)))
+        return np.array([v_nom, w_nom])
+
     def _tick(self) -> None:
         self.n_ticks += 1
 
+        cmd = self._nominal_cmd()
         robot_msg = Twist()
-        robot_msg.linear.x = float(self.robot_cmd[0])
-        robot_msg.angular.z = float(self.robot_cmd[1])
+        robot_msg.linear.x = float(cmd[0])
+        robot_msg.angular.z = float(cmd[1])
         self.pub_robot_cmd.publish(robot_msg)
 
         obs_msg = Twist()

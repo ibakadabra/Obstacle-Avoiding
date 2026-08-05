@@ -1,0 +1,40 @@
+# İŞ 5.4-B on kosulu 2: orijinal pilotun (İŞ 5.3, pilot_sweep.yaml) AYNISI --
+# tek fark cost_normalized=true ve goal_seeking nominal. Amac: pilotun
+# buldugu ayrisma bandinin (v=0.8, y=0.3) normalize maliyette de gecerli
+# olup olmadigini dogrulamak. Eski pilot normalize edilmemis maliyetle
+# (bkz. İŞ5.4-A) kosulmustu -- o sonuclar artefaktla kirlenmis olabilir.
+scenario:
+  name: pilot_v2
+  robot:
+    start: [0.0, 0.0, 0.0]
+    cmd: {v: 0.22, omega: 0.0}   # goal_seeking oldugu icin KULLANILMAZ
+  obstacle:
+    start: [3.0, 0.0, 3.14159]     # y (index 1) sweep tarafindan ezilir
+    velocity: [-0.3, 0.0]          # x-bileseni (index 0) sweep tarafindan ezilir
+  duration: 15.0
+  settle_time: 2.0
+nominal:
+  type: goal_seeking
+  goal: [4.0, 0.0]
+  k_p: 1.5
+  slowdown_radius: 0.5
+  v_max: 0.22
+  omega_max: 2.84
+filter:
+  alpha: 1.0
+  d_safe: 0.5237
+  prediction_horizon: 0.0
+  control_rate: 10.0
+  mode: REACTIVE   # sweep tarafindan ezilir
+  v_min: 0.0
+  cost_normalized: true
+  w_v: 1.0
+  w_w: 1.0
+  lookahead_L: 0.10
+
+sweep:
+  scenario.obstacle.velocity[0]: [-0.3, -0.8, -1.4]
+  scenario.obstacle.start[1]: [0.0, 0.3, 0.6]
+  filter.mode: [REACTIVE, DCBF]
+runs_per_cell: 5
+# 3 x 3 x 2 x 5 = 90 kosu

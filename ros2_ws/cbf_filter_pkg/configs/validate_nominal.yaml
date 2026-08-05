@@ -1,0 +1,33 @@
+# İŞ 5.4-B on kosulu 1: nominal kontrolcunun taban cizgisi dogrulamasi.
+# Engel COK uzakta (asla etkilesime girmez) -- robot sadece nominal
+# kontrolcuye gore hedefe gitmeli, goal_reached=1 ve makul time_to_goal
+# vermeli. Bu, sonraki tum bedel metriklerinin (frozen, time_to_goal,
+# path_length) referans/taban cizgisidir.
+scenario:
+  name: validate_nominal
+  robot:
+    start: [0.0, 0.0, 0.0]
+    cmd: {v: 0.22, omega: 0.0}   # nominal.type=goal_seeking oldugu icin KULLANILMAZ
+  obstacle:
+    start: [100.0, 100.0, 0.0]   # etkilesime girmeyecek kadar uzak
+    velocity: [0.0, 0.0]
+  duration: 20.0
+  settle_time: 2.0
+nominal:
+  type: goal_seeking
+  goal: [4.0, 0.0]
+  k_p: 1.5
+  slowdown_radius: 0.5
+  v_max: 0.22
+  omega_max: 2.84
+filter:
+  alpha: 1.0
+  d_safe: 0.5237
+  prediction_horizon: 0.0
+  control_rate: 10.0
+  mode: DCBF
+  v_min: 0.0
+  cost_normalized: true
+  w_v: 1.0
+  w_w: 1.0
+  lookahead_L: 0.10
