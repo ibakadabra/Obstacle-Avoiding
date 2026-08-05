@@ -1,0 +1,30 @@
+# İŞ 5.4-A karar noktasi: v_min testini (İŞ 5.2) normalize edilmis maliyetle
+# TEKRARLA. İŞ 5.2'de v_min=-0.22 guvenligi dusurmustu (contact 0/10->10/10);
+# hipotez, bunun ozgun (normalize edilmemis) maliyetin donusu cezalandirip
+# QP'yi "ucuz" duz geri cekilmeye zorlamasindan kaynaklandigi. Eger
+# normalize maliyette v_min=-0.22 artik zarar vermiyorsa (veya fayda
+# sagliyorsa), İŞ 5.2'nin gerekcesi guncellenmeli.
+scenario:
+  name: vmin_norm
+  robot:
+    start: [0.0, 0.0, 0.0]
+    cmd: {v: 0.22, omega: 0.0}
+  obstacle:
+    start: [3.0, 0.3, 3.14159]
+    velocity: [-0.8, 0.0]
+  duration: 15.0
+  settle_time: 2.0
+filter:
+  alpha: 1.0
+  d_safe: 0.5237
+  prediction_horizon: 0.0
+  control_rate: 20.0
+  mode: DCBF
+  cost_normalized: true
+  w_v: 1.0
+  w_w: 1.0
+  v_min: 0.0   # sweep tarafindan ezilir
+
+sweep:
+  filter.v_min: [0.0, -0.22]
+runs_per_cell: 10
