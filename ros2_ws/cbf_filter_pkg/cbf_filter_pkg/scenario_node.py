@@ -51,8 +51,9 @@ import yaml
 from geometry_msgs.msg import Twist
 from rclpy.node import Node
 from rclpy.parameter import Parameter
-from rcl_interfaces.srv import SetParameters, GetParameters
+from rcl_interfaces.srv import SetParameters
 from std_srvs.srv import Empty
+from cbf_filter_pkg.params import Config as _Config
 
 OBSTACLE_SDF_PATH = '/home/tusaslab7/tez_cbf/moving_obstacle.sdf'
 
@@ -97,6 +98,7 @@ class ScenarioNode(Node):
         # kosu bu degerleri gercekten uyguluyor -- mode sweep'inin anlamli
         # olmasi icin sart.
         filt = cfg.get('filter', {})
+        lookahead_L = float(filt.get('lookahead_L', _Config().robot.lookahead))
         self._set_filter_params(
             mode=filt.get('mode', 'REACTIVE'),
             alpha=float(filt.get('alpha', 1.0)),
@@ -104,7 +106,8 @@ class ScenarioNode(Node):
             v_min=float(filt.get('v_min', 0.0)),
             cost_normalized=bool(filt.get('cost_normalized', False)),
             w_v=float(filt.get('w_v', 1.0)),
-            w_w=float(filt.get('w_w', 1.0)))
+            w_w=float(filt.get('w_w', 1.0)),
+            lookahead_L=lookahead_L)
 
         obs_start = sc['obstacle']['start']
         self.get_logger().info(f'Engel yeniden konumlandiriliyor: {obs_start}')
@@ -124,12 +127,21 @@ class ScenarioNode(Node):
         # gecerli olan degerlere gore raporlamasi gerekir.
         #
         # d_safe/contact_distance/lookahead_offset ise YAML'da HICBIR ZAMAN
-        # gercekten set edilmiyordu (metadata idi) -- burada filtrenin CANLI
-        # parametreleriyle EZILIYOR, boylece dump her zaman o kosuda
-        # GERCEKTEN kullanilan degeri yansitir.
-        live_geom = self._get_live_filter_geometry()
-        if live_geom:
-            cfg.setdefault('filter', {}).update(live_geom)
+        # gercekten set edilmiyordu (metadata idi) -- burada params.py'nin
+        # AYNI formuluyle (Config sinifi) YENIDEN HESAPLANIP yaziliyor,
+        # boylece dump her zaman o kosuda GERCEKTEN kullanilan degeri
+        # yansitir. Onceden bunu filtreden CANLI SORGULUYORDUK
+        # (get_parameters) ama İŞ 5.4-D'de lookahead_L da settable oldugunda
+        # d_safe'i SALT-OKUNUR bir ROS parametresi olarak tutmak (L
+        # degisince bayatlar) yerine burada yerel hesap tercih edildi --
+        # ayni formul, sorgu round-trip'i yok.
+        geom_cfg = _Config()
+        geom_cfg.robot.lookahead = lookahead_L
+        cfg.setdefault('filter', {}).update({
+            'lookahead_offset': lookahead_L,
+            'contact_distance': geom_cfg.filter.contact_distance(geom_cfg.robot, geom_cfg.obstacle),
+            'd_safe': geom_cfg.filter.d_safe(geom_cfg.robot, geom_cfg.obstacle),
+        })
 
         with open(bag_dir + '_config.yaml', 'w') as f:
             yaml.safe_dump(cfg, f)
@@ -167,13 +179,14 @@ class ScenarioNode(Node):
         return True
 
     def _set_filter_params(self, mode: str, alpha: float, t_horizon: float, v_min: float = 0.0,
-                            cost_normalized: bool = False, w_v: float = 1.0, w_w: float = 1.0) -> None:
+                            cost_normalized: bool = False, w_v: float = 1.0, w_w: float = 1.0,
+                            lookahead_L: float = 0.10) -> None:
         client = self.create_client(SetParameters, '/safety_filter_node/set_parameters')
         if not client.wait_for_service(timeout_sec=5.0):
             self.get_logger().warn(
-                'safety_filter_node bulunamadi -- mode/alpha/t_horizon/v_min/cost '
-                'parametreleri eski degerinde kaliyor (bu kosu METADATA ile GERCEK '
-                'filtre davranisi arasinda TUTARSIZ olabilir!).')
+                'safety_filter_node bulunamadi -- mode/alpha/t_horizon/v_min/cost/'
+                'lookahead_L parametreleri eski degerinde kaliyor (bu kosu METADATA '
+                'ile GERCEK filtre davranisi arasinda TUTARSIZ olabilir!).')
             return
         req = SetParameters.Request()
         req.parameters = [
@@ -184,6 +197,7 @@ class ScenarioNode(Node):
             Parameter('cost_normalized', Parameter.Type.BOOL, cost_normalized).to_parameter_msg(),
             Parameter('w_v', Parameter.Type.DOUBLE, w_v).to_parameter_msg(),
             Parameter('w_w', Parameter.Type.DOUBLE, w_w).to_parameter_msg(),
+            Parameter('lookahead_L', Parameter.Type.DOUBLE, lookahead_L).to_parameter_msg(),
         ]
         future = client.call_async(req)
         rclpy.spin_until_future_complete(self, future, timeout_sec=5.0)
@@ -195,34 +209,8 @@ class ScenarioNode(Node):
                 self.get_logger().warn(f'{p.name} ayarlanamadi: {result.reason}')
         self.get_logger().info(
             f'Filtre parametreleri: mode={mode} alpha={alpha} t_horizon={t_horizon} '
-            f'v_min={v_min} cost_normalized={cost_normalized} w_v={w_v} w_w={w_w}')
-
-    def _get_live_filter_geometry(self) -> dict:
-        """d_safe/contact_distance/lookahead_offset'i safety_filter_node'un
-        SALT-OKUNUR parametrelerinden CANLI sorgular. Bunlar params.py
-        sabitlerinden turer ve YAML'da hic bir zaman gercekten set edilmez
-        -- amac, bag'in yanina yazilan config.yaml'in HER ZAMAN o kosuda
-        GERCEKTEN kullanilan degeri yansitmasi, YAML dosyasinin (elle
-        duzenlenebilen, potansiyel BAYAT) statik metnini degil. params.py
-        degisirse (ornegin robot_radius duzeltmesi, Agu 2026) eski bag'ler
-        kendi zamanlarindaki dogru degeri korur, yeni kosular yenisini alir
-        -- karsilastirmalar bozulmaz."""
-        client = self.create_client(GetParameters, '/safety_filter_node/get_parameters')
-        if not client.wait_for_service(timeout_sec=5.0):
-            self.get_logger().warn(
-                'safety_filter_node bulunamadi -- d_safe/contact_distance '
-                'canli sorgulanamadi, config.yaml eski/statik degeri koruyacak.')
-            return {}
-        req = GetParameters.Request()
-        req.names = ['d_safe', 'contact_distance', 'lookahead_offset']
-        future = client.call_async(req)
-        rclpy.spin_until_future_complete(self, future, timeout_sec=5.0)
-        if not future.done() or future.result() is None:
-            self.get_logger().warn('get_parameters cagrisi zaman asimina ugradi.')
-            return {}
-        values = {name: pv.double_value for name, pv in zip(req.names, future.result().values)}
-        self.get_logger().info(f'Canli filtre geometrisi: {values}')
-        return values
+            f'v_min={v_min} cost_normalized={cost_normalized} w_v={w_v} w_w={w_w} '
+            f'lookahead_L={lookahead_L}')
 
     def _reset_state(self) -> None:
         # Robotu once durdur: reset_world konumu sifirlar ama govdedeki

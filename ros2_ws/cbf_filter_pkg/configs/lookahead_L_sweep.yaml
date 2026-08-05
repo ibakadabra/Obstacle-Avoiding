@@ -1,0 +1,36 @@
+# İŞ 5.4-D: lookahead kolu (L) tarama. Pilotta y=0.0 (kafa-kafaya) her hizda
+# HER IKI mod da carpisiyordu -- relative degree sorunu: Δp_y=0 iken ω
+# kisitin katsayisi (2·Δp·G(θ)·u terimindeki Δp) sifira yakin kaliyor,
+# robot sadece frenleyebiliyor. L buyudukce G(θ) matrisindeki L*sin/L*cos
+# terimleri buyur, teorik olarak yanal gradyan biraz artabilir.
+#
+# NOT: d_safe = contact_distance + L + margin FORMULU geregi L buyudukce
+# d_safe de buyur (konservatiflik artar) -- bu scenario_node tarafinda
+# otomatik hesaplanip bag'e yaziliyor (bkz. _Config kullanimi).
+#
+# cost_normalized=true kullanildi (İŞ 5.4-A karari: artik standart).
+scenario:
+  name: lookahead_L
+  robot:
+    start: [0.0, 0.0, 0.0]
+    cmd: {v: 0.22, omega: 0.0}
+  obstacle:
+    start: [3.0, 0.0, 3.14159]    # y=0.0: kafa-kafaya (relative degree sinama)
+    velocity: [-0.8, 0.0]
+  duration: 15.0
+  settle_time: 2.0
+filter:
+  alpha: 1.0
+  d_safe: 0.5237   # sweep tarafindan ezilir (L degisince yeniden hesaplanir)
+  prediction_horizon: 0.0
+  control_rate: 20.0
+  mode: DCBF
+  v_min: 0.0
+  cost_normalized: true
+  w_v: 1.0
+  w_w: 1.0
+  lookahead_L: 0.10   # sweep tarafindan ezilir
+
+sweep:
+  filter.lookahead_L: [0.10, 0.20, 0.30]
+runs_per_cell: 10

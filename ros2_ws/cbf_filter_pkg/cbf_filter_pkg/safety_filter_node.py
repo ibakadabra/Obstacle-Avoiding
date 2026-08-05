@@ -7,7 +7,7 @@ from geometry_msgs.msg import Twist
 from nav_msgs.msg import Odometry
 from std_msgs.msg import Float64, String
 from std_srvs.srv import Empty
-from rcl_interfaces.msg import SetParametersResult, ParameterDescriptor
+from rcl_interfaces.msg import SetParametersResult
 
 from cbf_filter_pkg.cbf import Mode, safety_filter
 from cbf_filter_pkg.params import Config
@@ -48,6 +48,13 @@ class SafetyFilterNode(Node):
         self.declare_parameter('cost_normalized', False)
         self.declare_parameter('w_v', 1.0)
         self.declare_parameter('w_w', 1.0)
+        # İŞ 5.4-D: lookahead_L artik SETTABLE (kafa-kafaya senaryoda yanal
+        # gradyan uretmek icin kol uzunlugu taraniyor). d_safe = contact_dist
+        # + lookahead + margin FORMULU L'ye bagli oldugu icin d_safe'i
+        # ARTIK SALT-OKUNUR ROS parametresi olarak TUTMUYORUZ (L degisince
+        # bayatlardi) -- scenario_node kendi tarafinda AYNI formulu
+        # (params.py Config sinifi) kullanarak hesapliyor, sorguya gerek yok.
+        self.declare_parameter('lookahead_L', self.cfg.robot.lookahead)
         self.mode = Mode[self.get_parameter('mode').value]
         self.cfg.filter.alpha = self.get_parameter('alpha').value
         self.cfg.filter.T_horizon = self.get_parameter('t_horizon').value
@@ -55,25 +62,8 @@ class SafetyFilterNode(Node):
         self.cfg.filter.cost_normalized = self.get_parameter('cost_normalized').value
         self.cfg.filter.w_v = self.get_parameter('w_v').value
         self.cfg.filter.w_w = self.get_parameter('w_w').value
+        self.cfg.robot.lookahead = self.get_parameter('lookahead_L').value
         self.add_on_set_parameters_callback(self.on_param_change)
-
-        # d_safe/contact_distance/lookahead_offset: SALT-OKUNUR bilgi
-        # parametreleri (robot.radius/obstacle.radius/robot.lookahead/
-        # d_margin gibi params.py sabitlerinden turer, calisma zamaninda
-        # DEGISMEZ). scenario_node her kosu oncesi bunlari canli SORGULAYIP
-        # bag'in yanindaki config.yaml'a YAZAR -- boylece kaydedilen deger
-        # YAML dosyasindaki (potansiyel BAYAT) metne degil, o an filtrenin
-        # GERCEKTEN kullandigi degere dayanir. params.py degisirse (ornegin
-        # robot_radius duzeltmesi) eski bag'ler kendi kaydettikleri eski
-        # degerle dogru kalir, yeni kosular yeni degerle -- karsilastirma
-        # bozulmaz.
-        ro = ParameterDescriptor(read_only=True)
-        self.declare_parameter(
-            'd_safe', self.cfg.filter.d_safe(self.cfg.robot, self.cfg.obstacle), ro)
-        self.declare_parameter(
-            'contact_distance',
-            self.cfg.filter.contact_distance(self.cfg.robot, self.cfg.obstacle), ro)
-        self.declare_parameter('lookahead_offset', self.cfg.robot.lookahead, ro)
 
         self.sub_odom = self.create_subscription(
             Odometry, '/odom', self.on_odom, 10)
@@ -124,6 +114,8 @@ class SafetyFilterNode(Node):
                 self.cfg.filter.w_v = p.value
             elif p.name == 'w_w':
                 self.cfg.filter.w_w = p.value
+            elif p.name == 'lookahead_L':
+                self.cfg.robot.lookahead = p.value
         return SetParametersResult(successful=True)
 
     def on_reset(self, request, response):
