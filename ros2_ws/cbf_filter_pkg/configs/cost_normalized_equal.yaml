@@ -1,0 +1,22 @@
+# İŞ 5.4-A karsilastirma testi, varyant 2/3: normalize, esit agirlik (w_v=w_w=1.0).
+scenario:
+  name: cost_norm_eq
+  robot:
+    start: [0.0, 0.0, 0.0]
+    cmd: {v: 0.22, omega: 0.0}
+  obstacle:
+    start: [3.0, 0.3, 3.14159]
+    velocity: [-0.8, 0.0]
+  duration: 15.0
+  settle_time: 2.0
+filter:
+  alpha: 1.0
+  d_safe: 0.5237
+  prediction_horizon: 0.0
+  control_rate: 20.0
+  mode: DCBF
+  v_min: 0.0
+  cost_normalized: true
+  w_v: 1.0
+  w_w: 1.0
+runs_per_cell: 10
