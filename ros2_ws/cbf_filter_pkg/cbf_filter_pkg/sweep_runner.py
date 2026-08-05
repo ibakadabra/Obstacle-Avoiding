@@ -37,20 +37,38 @@ import yaml
 RESULTS_DIR = os.path.expanduser('~/tez_cbf/results')
 
 
+def _split_index(part: str):
+    """'start[1]' -> ('start', 1);  'mode' -> ('mode', None)."""
+    if part.endswith(']') and '[' in part:
+        name, idx = part[:-1].split('[')
+        return name, int(idx)
+    return part, None
+
+
 def set_dotted(cfg: dict, dotted_key: str, value) -> None:
-    """cfg['filter']['control_rate'] = value  <-  'filter.control_rate'"""
+    """cfg['filter']['control_rate'] = value  <-  'filter.control_rate'
+    Liste elemanlarina da yazabilir (İŞ 5.3):
+    cfg['scenario']['obstacle']['start'][1] = value  <-  'scenario.obstacle.start[1]'
+    (ornegin sadece engelin y baslangicini degistirmek, x/theta'ya dokunmadan)."""
     parts = dotted_key.split('.')
     node = cfg
     for p in parts[:-1]:
-        node = node.setdefault(p, {})
-    node[parts[-1]] = value
+        name, idx = _split_index(p)
+        node = node.setdefault(name, {})
+        if idx is not None:
+            node = node[idx]
+    last_name, last_idx = _split_index(parts[-1])
+    if last_idx is not None:
+        node[last_name][last_idx] = value
+    else:
+        node[last_name] = value
 
 
 def cell_label(cell: dict) -> str:
     """Hucreyi dosya adinda kullanilabilir kisa bir etikete cevirir."""
     bits = []
     for key, value in cell.items():
-        short = key.split('.')[-1]
+        short = key.split('.')[-1].replace('[', '').replace(']', '')
         bits.append(f'{short}{value}')
     return '_'.join(bits)
 

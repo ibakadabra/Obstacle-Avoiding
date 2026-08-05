@@ -1,0 +1,40 @@
+# İŞ 5.3 — PİLOT KAMPANYA: ayrışma bandını bulmak (tam taramadan ONCE).
+#
+# Not: plandaki "base_config: configs/lateral_offset.yaml" satiri
+# sweep_runner'in DESTEKLEMEDIGI bir sozdizimi (boyle bir dosya da yok) --
+# sweep_runner tum senaryo/filtre alanlarini AYNI YAML icinde bekliyor
+# (mode_sweep.yaml, vmin_sweep.yaml ile ayni desen). Bu dosya kendi icinde
+# tam/bagimsiz.
+#
+# Sabitler (İŞ 1-5.2 kararlari): alpha=1.0, d_safe=0.5237 (lookahead+margin
+# dahil), control_rate=10 Hz (İŞ Kampanya-1'de etkisiz oldugu kanitlandi,
+# 90 kosuluk pilotta hiz icin dusuruldu), v_min=0.0 (İŞ 5.2: geri hareket
+# izni GUVENLIGI AZALTTI, sabit kisit olarak kaldi).
+#
+# obstacle.start[1] (y) sweep: 0.0 (kafa-kafaya) -> 0.6 (yanal).
+# obstacle.velocity[0] sweep: -0.3/-0.8/-1.4 m/s (hiz orani 1.4x/3.6x/6.4x,
+# robot v=0.22 m/s'ye gore).
+scenario:
+  name: pilot
+  robot:
+    start: [0.0, 0.0, 0.0]
+    cmd: {v: 0.22, omega: 0.0}
+  obstacle:
+    start: [3.0, 0.0, 3.14159]     # y (index 1) sweep tarafindan ezilir
+    velocity: [-0.3, 0.0]          # x-bileseni (index 0) sweep tarafindan ezilir
+  duration: 15.0
+  settle_time: 2.0
+filter:
+  alpha: 1.0
+  d_safe: 0.5237
+  prediction_horizon: 0.0
+  control_rate: 10.0
+  mode: REACTIVE   # sweep tarafindan ezilir
+  v_min: 0.0
+
+sweep:
+  scenario.obstacle.velocity[0]: [-0.3, -0.8, -1.4]
+  scenario.obstacle.start[1]: [0.0, 0.3, 0.6]
+  filter.mode: [REACTIVE, DCBF]
+runs_per_cell: 5
+# 3 x 3 x 2 x 5 = 90 kosu
