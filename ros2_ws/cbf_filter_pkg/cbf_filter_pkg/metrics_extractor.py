@@ -51,7 +51,7 @@ CSV_FIELDS = [
     'path_length_m',
     'intervention_integral', 'intervention_max', 'intervention_duration_s',
     'v_intervention_integral', 'w_intervention_integral', 'omega_intervention_share',
-    'v_mean', 'v_min', 'frozen', 'frozen_before_contact',
+    'v_mean', 'v_min', 'frozen', 'frozen_before_contact', 'run_valid',
 ]
 
 # h_min bu esigin ALTINDAYSA gercek ihlal sayilir. Sifir kullanilamaz: CBF
@@ -175,8 +175,10 @@ def _path_metrics(odom_t):
             window_start = None
 
     final_x = odom_t[-1][1]
+    final_y = odom_t[-1][2]
     return dict(path_length=path_length, v_mean=v_mean, v_min=v_min,
-                frozen=frozen, frozen_start_t=frozen_start_t, final_x=final_x, t0=t0)
+                frozen=frozen, frozen_start_t=frozen_start_t,
+                final_x=final_x, final_y=final_y, t0=t0)
 
 
 def _first_contact_time(odom_t, obstacle_t, contact_distance):
@@ -305,6 +307,7 @@ def extract_one(bag_dir: str, default_contact_distance: float) -> dict:
     contact_distance_str = lookahead_str = ''
     cost_normalized = w_v = w_w = ''
     nominal_v = duration = goal_xy = None
+    start_x, start_y, v_max_valid = 0.0, 0.0, 0.22
     if os.path.exists(cfg_path):
         with open(cfg_path) as f:
             cfg = yaml.safe_load(f) or {}
@@ -329,6 +332,10 @@ def extract_one(bag_dir: str, default_contact_distance: float) -> dict:
         duration = sc.get('duration')
         nominal_block = cfg.get('nominal', {'type': 'constant'})
         goal_xy = tuple(nominal_block['goal']) if nominal_block.get('type') == 'goal_seeking' else None
+        robot_start = sc.get('robot', {}).get('start', [0.0, 0.0, 0.0])
+        start_x, start_y = robot_start[0], robot_start[1]
+        v_max_valid = float(nominal_block.get('v_max', 0.22)) if nominal_block.get('type') == 'goal_seeking' \
+            else float(nominal_v) if nominal_v else 0.22
 
     # d_safe bu bag icin bilinmiyorsa (eski kayit / config.yaml yok) DEFAULT_D_SAFE
     # kullanilir -- h_at_contact SADECE bilgilendirici bir referans esik,
@@ -355,6 +362,29 @@ def extract_one(bag_dir: str, default_contact_distance: float) -> dict:
     im = _intervention_metrics(data['cmd_actual'], data['cmd_nominal'])
     t_contact = _first_contact_time(data['odom_t'], data['obstacle_t'], contact_distance)
     frozen_before_contact = _frozen_before_contact(pm['frozen'], pm['frozen_start_t'], t_contact)
+
+    # İŞ 4 (Ağu 2026): fiziksel olabilirlik dogrulamasi. 600 kosuluk 5.4-B
+    # kampanyasinda bir kosuda final_x=-18.32m gibi FIZIKSEL OLARAK IMKANSIZ
+    # bir konum sicramasi bulundu (15s'de v_max=0.22 ile en fazla ~3.3m
+    # gidilebilir) -- muhtemelen Gazebo/reset artefakti. Bu kosu d_min_ort/
+    # h_min_ort gibi ORTALAMALARI anlamsiz hale getiriyordu. Medyan yerine
+    # ACIK BIR BAYRAK tercih edildi -- medyan aykiriligi SESSIZCE gizler,
+    # oysa 640 kosuluk kampanyada boyle bir artefaktin ORANI onemli bir
+    # simulator-kararliligi sinyalidir, gizlenmemeli.
+    duration_val = float(duration) if duration else 15.0
+    displacement = ((pm['final_x'] - start_x) ** 2 + (pm['final_y'] - start_y) ** 2) ** 0.5 \
+        if pm['final_x'] == pm['final_x'] else float('nan')
+    max_displacement = v_max_valid * duration_val * 1.1
+    max_path = v_max_valid * duration_val * 1.2
+    run_valid = 1
+    if displacement == displacement and displacement > max_displacement:
+        run_valid = 0
+    if dmin == dmin and dmin > 20.0:
+        run_valid = 0
+    if h_min == h_min and abs(h_min) > 100.0:
+        run_valid = 0
+    if pm['path_length'] == pm['path_length'] and pm['path_length'] > max_path:
+        run_valid = 0
 
     def _fmt(x, nd=4):
         return f'{x:.{nd}f}' if x == x else ''  # NaN kontrolu
@@ -411,6 +441,7 @@ def extract_one(bag_dir: str, default_contact_distance: float) -> dict:
         'v_min': _fmt(pm['v_min']),
         'frozen': pm['frozen'],
         'frozen_before_contact': frozen_before_contact,
+        'run_valid': run_valid,
     }
     return row
 
