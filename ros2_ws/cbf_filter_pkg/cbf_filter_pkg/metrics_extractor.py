@@ -38,7 +38,7 @@ from rosidl_runtime_py.utilities import get_message
 
 CSV_FIELDS = [
     'run_name', 'bag_dir', 'n_msgs',
-    'alpha', 'd_safe', 'lookahead_offset_m', 'v_min', 'mode', 'control_rate', 'prediction_horizon',
+    'alpha', 'd_safe', 'lookahead_offset_m', 'v_min_param', 'mode', 'control_rate', 'prediction_horizon',
     'd_min', 'd_eff_min', 'contact_distance', 'h_at_contact', 'contact',
     'margin_violation', 'penetration_depth_m',
     'qp_infeasible_count', 'qp_infeasible_any',
@@ -220,7 +220,7 @@ def extract_one(bag_dir: str, default_contact_distance: float) -> dict:
     data = _read_bag(bag_dir)
 
     cfg_path = bag_dir.rstrip('/').rstrip('\\') + '_config.yaml'
-    alpha = d_safe = v_min = mode = control_rate = prediction_horizon = ''
+    alpha = d_safe = v_min_param = mode = control_rate = prediction_horizon = ''
     contact_distance_str = lookahead_str = ''
     nominal_v = duration = None
     if os.path.exists(cfg_path):
@@ -229,7 +229,7 @@ def extract_one(bag_dir: str, default_contact_distance: float) -> dict:
         filt = cfg.get('filter', {})
         alpha = filt.get('alpha', '')
         d_safe = filt.get('d_safe', '')
-        v_min = filt.get('v_min', '')
+        v_min_param = filt.get('v_min', '')
         mode = filt.get('mode', '')
         control_rate = filt.get('control_rate', '')
         prediction_horizon = filt.get('prediction_horizon', '')
@@ -277,7 +277,7 @@ def extract_one(bag_dir: str, default_contact_distance: float) -> dict:
         'alpha': alpha,
         'd_safe': d_safe,
         'lookahead_offset_m': lookahead_str,
-        'v_min': v_min,
+        'v_min_param': v_min_param,
         'mode': mode,
         'control_rate': control_rate,
         'prediction_horizon': prediction_horizon,
