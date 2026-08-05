@@ -1,0 +1,25 @@
+# Tutarlilik kontrolu (IS 4): T_horizon=0 iken SHIFT_CORRECT'in p_obs_eff'i
+# x_o[:2]'ye esitlenir (kayma sifir), delta_p ve h_ek DCBF ile AYNI olur.
+# cbf.py'nin yapisindan matematiksel olarak SHIFT_CORRECT=DCBF beklenir --
+# bu kosu bunu ampirik dogruluyor (Gazebo/QP sayisal gurultusu disinda
+# h_min/d_min pratik olarak ozdes cikmali).
+scenario:
+  name: shift_t0_check
+  robot:
+    start: [0.0, 0.0, 0.0]
+    cmd: {v: 0.22, omega: 0.0}
+  obstacle:
+    start: [3.0, 0.3, 3.14159]
+    velocity: [-0.3, 0.0]
+  duration: 15.0
+  settle_time: 2.0
+filter:
+  alpha: 1.0
+  d_safe: 0.5237
+  prediction_horizon: 0.0
+  control_rate: 20.0
+  mode: SHIFT_CORRECT   # sweep tarafindan ezilir
+
+sweep:
+  filter.mode: [SHIFT_CORRECT, DCBF]
+runs_per_cell: 3

@@ -1,0 +1,28 @@
+# IS 4: SHIFT'in turev eksikligi testi. Hareketli engel (0.3 m/s), ayni
+# senaryo mode_sweep.yaml ile ayni (dogrudan karsilastirilabilir olsun diye).
+#
+# Beklenti: SHIFT (naif) ~REACTIVE gibi davranir (mode_sweep sonucu: h_min~-0.028,
+# marj ihlali 10/10). SHIFT_CORRECT, DCBF'e yakinsamali (T_horizon=0.5 ile TAM
+# ayni degil ama benzer buyuklukte h_min ve ihlalsiz olmali). T_horizon=0 ozel
+# durumunda (bu kampanyada TEST EDILMIYOR, ayri dogrulama) SHIFT_CORRECT=DCBF
+# matematiksel olarak ozdes olmali (cbf.py'nin yapisindan).
+scenario:
+  name: shift_fix
+  robot:
+    start: [0.0, 0.0, 0.0]
+    cmd: {v: 0.22, omega: 0.0}
+  obstacle:
+    start: [3.0, 0.3, 3.14159]
+    velocity: [-0.3, 0.0]
+  duration: 15.0
+  settle_time: 2.0
+filter:
+  alpha: 1.0
+  d_safe: 0.5237
+  prediction_horizon: 0.5
+  control_rate: 20.0
+  mode: SHIFT   # sweep tarafindan ezilir
+
+sweep:
+  filter.mode: [SHIFT, SHIFT_CORRECT, DCBF]
+runs_per_cell: 10
