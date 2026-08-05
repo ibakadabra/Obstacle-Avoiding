@@ -51,7 +51,7 @@ CSV_FIELDS = [
     'path_length_m',
     'intervention_integral', 'intervention_max', 'intervention_duration_s',
     'v_intervention_integral', 'w_intervention_integral', 'omega_intervention_share',
-    'v_mean', 'v_min', 'frozen',
+    'v_mean', 'v_min', 'frozen', 'frozen_before_contact',
 ]
 
 # h_min bu esigin ALTINDAYSA gercek ihlal sayilir. Sifir kullanilamaz: CBF
@@ -89,6 +89,7 @@ def _read_bag(bag_dir: str) -> dict:
     robot_xy, obstacle_xy = [], []
     h_values, qp_statuses, solve_times = [], [], []
     odom_t = []          # (t_s, x, y, v_actual)  -- /odom, v_actual=twist.linear.x
+    obstacle_t = []       # (t_s, x, y)            -- /moving_obstacle/odom, ZAMANLI
     cmd_actual = []       # (t_s, v, w)            -- /cmd_vel (u_safe, filtreden SONRA)
     cmd_nominal = []      # (t_s, v, w)            -- /safety_filter/cmd_vel_nominal (u_nom)
     n_msgs = 0
@@ -108,6 +109,7 @@ def _read_bag(bag_dir: str) -> dict:
         elif topic == '/moving_obstacle/odom':
             p = msg.pose.pose.position
             obstacle_xy.append((p.x, p.y))
+            obstacle_t.append((t_s, p.x, p.y))
         elif topic == '/safety_filter/h_value':
             h_values.append(msg.data)
         elif topic == '/safety_filter/qp_status':
@@ -121,7 +123,8 @@ def _read_bag(bag_dir: str) -> dict:
 
     return dict(robot_xy=robot_xy, obstacle_xy=obstacle_xy, h_values=h_values,
                 qp_statuses=qp_statuses, solve_times=solve_times, n_msgs=n_msgs,
-                odom_t=odom_t, cmd_actual=cmd_actual, cmd_nominal=cmd_nominal)
+                odom_t=odom_t, obstacle_t=obstacle_t,
+                cmd_actual=cmd_actual, cmd_nominal=cmd_nominal)
 
 
 def _d_min(robot_xy, obstacle_xy) -> float:
@@ -156,7 +159,9 @@ def _path_metrics(odom_t):
     v_mean, v_min = sum(vs) / len(vs), min(vs)
 
     # frozen: v < esik olan ARDISIK bir zaman penceresi >= FROZEN_MIN_DURATION
+    # frozen_start_t: bu penceRenin BASLADIGI an (frozen_before_contact icin gerekli)
     frozen = 0
+    frozen_start_t = None
     window_start = None
     for t, _, _, v in odom_t:
         if v < FROZEN_V_THRESH:
@@ -164,13 +169,44 @@ def _path_metrics(odom_t):
                 window_start = t
             elif t - window_start >= FROZEN_MIN_DURATION:
                 frozen = 1
+                frozen_start_t = window_start
                 break
         else:
             window_start = None
 
     final_x = odom_t[-1][1]
     return dict(path_length=path_length, v_mean=v_mean, v_min=v_min,
-                frozen=frozen, final_x=final_x, t0=t0)
+                frozen=frozen, frozen_start_t=frozen_start_t, final_x=final_x, t0=t0)
+
+
+def _first_contact_time(odom_t, obstacle_t, contact_distance):
+    """İŞ 3b: ilk gercek fiziksel temas ani (govde-govde < contact_distance).
+    Zaman damgali en-yakin-eslestirme ile (indeks-oranli DEGIL -- burada
+    ONCE/SONRA sirasi onemli oldugu icin tam zaman hizalamasi gerekiyor)."""
+    if not odom_t or not obstacle_t:
+        return None
+    oi = 0
+    for t, x, y, _ in odom_t:
+        while oi + 1 < len(obstacle_t) and abs(obstacle_t[oi + 1][0] - t) < abs(obstacle_t[oi][0] - t):
+            oi += 1
+        _, ox, oy = obstacle_t[oi]
+        d = ((x - ox) ** 2 + (y - oy) ** 2) ** 0.5
+        if d < contact_distance:
+            return t
+    return None
+
+
+def _frozen_before_contact(frozen, frozen_start_t, t_contact) -> int:
+    """İŞ 3b: `frozen`, cok koşuda `contact` ile ozdes cikiyordu -- carpip
+    engele dayanan robotun v->0 olmasi 'donma' olarak sayiliyordu, bu da
+    BAGIMSIZ bir bedel metrigi degil, CARPISMANIN SONUCU. Bu metrik donmanin
+    ilk temastan ONCE mi basladigini ayirt eder -- sadece bu durumda gercek
+    bir 'erken durup engele izin verme' bedelidir."""
+    if not frozen:
+        return 0
+    if t_contact is None:  # dondu ama hic temas olmadi -- orijinal tanimla ayni
+        return 1
+    return int(frozen_start_t is not None and frozen_start_t < t_contact)
 
 
 def _goal_metrics(odom_t, t0, nominal_v, duration, goal_xy=None):
@@ -317,6 +353,8 @@ def extract_one(bag_dir: str, default_contact_distance: float) -> dict:
     pm = _path_metrics(data['odom_t'])
     gm = _goal_metrics(data['odom_t'], pm['t0'], nominal_v, duration, goal_xy)
     im = _intervention_metrics(data['cmd_actual'], data['cmd_nominal'])
+    t_contact = _first_contact_time(data['odom_t'], data['obstacle_t'], contact_distance)
+    frozen_before_contact = _frozen_before_contact(pm['frozen'], pm['frozen_start_t'], t_contact)
 
     def _fmt(x, nd=4):
         return f'{x:.{nd}f}' if x == x else ''  # NaN kontrolu
@@ -372,6 +410,7 @@ def extract_one(bag_dir: str, default_contact_distance: float) -> dict:
         'v_mean': _fmt(pm['v_mean']),
         'v_min': _fmt(pm['v_min']),
         'frozen': pm['frozen'],
+        'frozen_before_contact': frozen_before_contact,
     }
     return row
 
