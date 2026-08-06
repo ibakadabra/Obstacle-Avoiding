@@ -1,0 +1,67 @@
+# İŞ 2: sinir takibi SABLONU (ikili arama). Bu dosya dogrudan kosulmak
+# icin degil, İŞ 3-6 kampanyalarina kopyalanip `sweep:` blogu
+# degistirilmek icin.
+#
+# YONTEM: yanal ofset SABIT (y=0.3, ayrisma bandinin cekirdegi), hiz
+# ekseninde kritik hiz (v_crit) araniyor -- kaba tarama + ikili arama.
+# Tam izgara yerine bu, ~172.000 kosu yerine ~60 kosu/nokta demek.
+#
+# UC AYRI SINIR ayri ayri araniyor (paylasimli onbellekle, kaba tarama
+# tekrar kosulmuyor):
+#   contact_rate          -> carpisma siniri     (fiziksel guvenlik)
+#   margin_violation_rate -> marj siniri         (tasarim garantisi)
+#   delta_active_rate     -> feasibility siniri  (aktuator limiti baglayici)
+# Ucunun BIRBIRINE GORE KONUMU bulgunun kendisi.
+#
+# slack_enabled: true ZORUNLU -- İŞ 1 bulgusu: hard kisitta olculen
+# "kritik hiz" kismen fallback politikasinin (maks fren) artefakti,
+# saf fiziksel sinir degil.
+mode: boundary_search
+
+scenario:
+  name: boundary_template
+  robot:
+    start: [0.0, 0.0, 0.0]
+    cmd: {v: 0.22, omega: 0.0}   # goal_seeking oldugu icin KULLANILMAZ
+  obstacle:
+    start: [3.0, 0.3, 3.14159]
+    velocity: [-0.8, 0.0]        # x-bileseni search.axis tarafindan ezilir
+  duration: 30.0
+  settle_time: 2.0
+nominal:
+  type: goal_seeking
+  goal: [4.0, 0.0]
+  k_p: 1.5
+  slowdown_radius: 0.5
+  v_max: 0.22
+  omega_max: 2.84
+filter:
+  alpha: 1.0
+  d_safe: 0.5237
+  prediction_horizon: 0.0
+  control_rate: 10.0
+  mode: DCBF
+  v_min: 0.0
+  cost_normalized: true
+  w_v: 1.0
+  w_w: 1.0
+  lookahead_L: 0.10
+  slack_enabled: true
+  slack_rho: 500.0
+
+search:
+  # Eksen deger POZITIF verilir, sign ile isaretlenip yazilir (engel
+  # robota dogru geldigi icin velocity[0] negatif olmali).
+  axis: scenario.obstacle.velocity[0]
+  sign: -1
+  coarse_points: [0.6, 0.9, 1.2, 1.5]
+  refine_steps: 2
+  target_metrics: [contact_rate, margin_violation_rate, delta_active_rate]
+  target_value: 0.5
+  runs_per_point: 10
+
+fixed:
+  scenario.obstacle.start[1]: 0.3
+
+# Her kombinasyon icin AYRI v_crit aranir. Bos birakilirsa tek hucre.
+sweep: {}

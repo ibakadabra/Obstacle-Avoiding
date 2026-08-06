@@ -23,7 +23,7 @@ setup(
         ],
     },
     entry_points={
-        'console_scripts': ['safety_filter_node = cbf_filter_pkg.safety_filter_node:main', 'obstacle_chaser_node = cbf_filter_pkg.obstacle_chaser_node:main', 'scenario_node = cbf_filter_pkg.scenario_node:main', 'metrics_extractor = cbf_filter_pkg.metrics_extractor:main', 'sweep_runner = cbf_filter_pkg.sweep_runner:main',
+        'console_scripts': ['safety_filter_node = cbf_filter_pkg.safety_filter_node:main', 'obstacle_chaser_node = cbf_filter_pkg.obstacle_chaser_node:main', 'scenario_node = cbf_filter_pkg.scenario_node:main', 'metrics_extractor = cbf_filter_pkg.metrics_extractor:main', 'sweep_runner = cbf_filter_pkg.sweep_runner:main', 'boundary_search = cbf_filter_pkg.boundary_search:main',
         ],
     },
 )
