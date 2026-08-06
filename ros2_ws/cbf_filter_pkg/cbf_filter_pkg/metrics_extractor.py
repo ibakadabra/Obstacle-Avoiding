@@ -52,6 +52,11 @@ CSV_FIELDS = [
     'intervention_integral', 'intervention_max', 'intervention_duration_s',
     'v_intervention_integral', 'w_intervention_integral', 'omega_intervention_share',
     'v_mean', 'v_min', 'frozen', 'frozen_before_contact', 'run_valid',
+    # İŞ 1 (Agu 2026, "Slack'li QP" spec'i): feasibility olcumunu IKILIDEN
+    # (infeasible mi degil mi) SUREKLIYE (ne kadar) cevirir -- bkz. cbf.py
+    # safety_filter, params.py FilterParams.slack_enabled/slack_rho.
+    'slack_enabled', 'slack_rho',
+    'delta_max', 'delta_integral', 'delta_active_ratio', 'delta_first_t_s',
 ]
 
 # h_min bu esigin ALTINDAYSA gercek ihlal sayilir. Sifir kullanilamaz: CBF
@@ -66,6 +71,7 @@ FROZEN_V_THRESH = 0.01      # m/s   -- bu esigin altinda "durmus" sayilir
 FROZEN_MIN_DURATION = 2.0   # s     -- bu sureden uzun surerse "frozen"
 INTERVENTION_THRESH = 1e-3  # ‖u_safe-u_nom‖ bu esigin ustundeyse "mudahale aktif"
 GOAL_FRACTION = 0.95        # nominal mesafenin bu oranina ulasilirsa "goal_reached"
+DELTA_ACTIVE_THRESH = 1e-3  # delta bu esigin ustundeyse "aktuator limiti baglayici" (İŞ 1)
 
 # params.py (cbf_filter_pkg) ile AYNI, ISI 1'de URDF/SDF'ten dogrulanan
 # degerler: robot.radius=0.1237 (govde kutusunun en kotu-durum kose yaricapi),
@@ -92,6 +98,7 @@ def _read_bag(bag_dir: str) -> dict:
     obstacle_t = []       # (t_s, x, y)            -- /moving_obstacle/odom, ZAMANLI
     cmd_actual = []       # (t_s, v, w)            -- /cmd_vel (u_safe, filtreden SONRA)
     cmd_nominal = []      # (t_s, v, w)            -- /safety_filter/cmd_vel_nominal (u_nom)
+    delta_t = []           # (t_s, delta)           -- /safety_filter/delta (İŞ 1, slack)
     n_msgs = 0
 
     while reader.has_next():
@@ -112,6 +119,8 @@ def _read_bag(bag_dir: str) -> dict:
             obstacle_t.append((t_s, p.x, p.y))
         elif topic == '/safety_filter/h_value':
             h_values.append(msg.data)
+        elif topic == '/safety_filter/delta':
+            delta_t.append((t_s, msg.data))
         elif topic == '/safety_filter/qp_status':
             qp_statuses.append(msg.data)
         elif topic == '/safety_filter/qp_solve_time_ms':
@@ -124,7 +133,7 @@ def _read_bag(bag_dir: str) -> dict:
     return dict(robot_xy=robot_xy, obstacle_xy=obstacle_xy, h_values=h_values,
                 qp_statuses=qp_statuses, solve_times=solve_times, n_msgs=n_msgs,
                 odom_t=odom_t, obstacle_t=obstacle_t,
-                cmd_actual=cmd_actual, cmd_nominal=cmd_nominal)
+                cmd_actual=cmd_actual, cmd_nominal=cmd_nominal, delta_t=delta_t)
 
 
 def _d_min(robot_xy, obstacle_xy) -> float:
@@ -299,6 +308,38 @@ def _intervention_metrics(cmd_actual, cmd_nominal):
                 v_integral=v_integral, w_integral=w_integral, omega_share=omega_share)
 
 
+def _delta_metrics(delta_t, t0):
+    """İŞ 1 (Agu 2026, "Slack'li QP" spec'i): slack degerinin (δ) zaman
+    serisinden dort metrik. delta_t bos ise (slack_enabled=False'lu eski
+    kayitlarda topic hic yayinlanmamis olabilir, veya delta_enabled=True
+    ama hicbir tick'te QP cozulmemisse) hepsi NaN/bos doner -- 0.0 DEGIL,
+    cunku "hic olculmedi" ile "olculdu ve hep sifirdi" ayri seyler."""
+    if not delta_t or t0 != t0:
+        return dict(delta_max=float('nan'), delta_integral=float('nan'),
+                    delta_active_ratio=float('nan'), delta_first_t=float('nan'))
+    ts = [t for t, _ in delta_t]
+    ds = [d for _, d in delta_t]
+    delta_max = max(ds)
+    delta_integral = 0.0
+    active_duration = 0.0
+    for i in range(1, len(delta_t)):
+        dt = ts[i] - ts[i - 1]
+        delta_integral += 0.5 * (ds[i] + ds[i - 1]) * dt
+        if ds[i] > DELTA_ACTIVE_THRESH:
+            active_duration += dt
+    total_duration = ts[-1] - ts[0] if len(ts) > 1 else float('nan')
+    delta_active_ratio = (active_duration / total_duration
+                           if total_duration == total_duration and total_duration > 0
+                           else float('nan'))
+    delta_first_t = float('nan')
+    for t, d in delta_t:
+        if d > DELTA_ACTIVE_THRESH:
+            delta_first_t = t - t0
+            break
+    return dict(delta_max=delta_max, delta_integral=delta_integral,
+                delta_active_ratio=delta_active_ratio, delta_first_t=delta_first_t)
+
+
 def extract_one(bag_dir: str, default_contact_distance: float) -> dict:
     data = _read_bag(bag_dir)
 
@@ -306,6 +347,7 @@ def extract_one(bag_dir: str, default_contact_distance: float) -> dict:
     alpha = d_safe = v_min_param = mode = control_rate = prediction_horizon = ''
     contact_distance_str = lookahead_str = ''
     cost_normalized = w_v = w_w = ''
+    slack_enabled = slack_rho = ''
     nominal_v = duration = goal_xy = None
     start_x, start_y, v_max_valid = 0.0, 0.0, 0.22
     if os.path.exists(cfg_path):
@@ -321,6 +363,8 @@ def extract_one(bag_dir: str, default_contact_distance: float) -> dict:
         cost_normalized = filt.get('cost_normalized', False)
         w_v = filt.get('w_v', '')
         w_w = filt.get('w_w', '')
+        slack_enabled = filt.get('slack_enabled', False)
+        slack_rho = filt.get('slack_rho', '')
         # ISI 1 duzeltmesinden SONRAKI kosularda scenario_node bunlari
         # filtrenin CANLI parametrelerinden yazar (bkz. scenario_node.py
         # _get_live_filter_geometry) -- ONCEKI kosularda yok, DEFAULT'a
@@ -362,6 +406,7 @@ def extract_one(bag_dir: str, default_contact_distance: float) -> dict:
     im = _intervention_metrics(data['cmd_actual'], data['cmd_nominal'])
     t_contact = _first_contact_time(data['odom_t'], data['obstacle_t'], contact_distance)
     frozen_before_contact = _frozen_before_contact(pm['frozen'], pm['frozen_start_t'], t_contact)
+    dm = _delta_metrics(data['delta_t'], pm['t0'])
 
     # İŞ 4 (Ağu 2026): fiziksel olabilirlik dogrulamasi. 600 kosuluk 5.4-B
     # kampanyasinda bir kosuda final_x=-18.32m gibi FIZIKSEL OLARAK IMKANSIZ
@@ -442,6 +487,12 @@ def extract_one(bag_dir: str, default_contact_distance: float) -> dict:
         'frozen': pm['frozen'],
         'frozen_before_contact': frozen_before_contact,
         'run_valid': run_valid,
+        'slack_enabled': int(slack_enabled) if slack_enabled != '' else '',
+        'slack_rho': slack_rho,
+        'delta_max': _fmt(dm['delta_max']),
+        'delta_integral': _fmt(dm['delta_integral']),
+        'delta_active_ratio': _fmt(dm['delta_active_ratio']),
+        'delta_first_t_s': _fmt(dm['delta_first_t']),
     }
     return row
 

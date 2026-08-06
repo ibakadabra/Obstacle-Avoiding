@@ -55,6 +55,10 @@ class SafetyFilterNode(Node):
         # bayatlardi) -- scenario_node kendi tarafinda AYNI formulu
         # (params.py Config sinifi) kullanarak hesapliyor, sorguya gerek yok.
         self.declare_parameter('lookahead_L', self.cfg.robot.lookahead)
+        # İŞ 1 (Agu 2026, "Slack'li QP" spec'i): guvenlik kisitini gevseten
+        # slack degiskeni -- bkz. params.py FilterParams, cbf.py safety_filter.
+        self.declare_parameter('slack_enabled', False)
+        self.declare_parameter('slack_rho', 500.0)
         self.mode = Mode[self.get_parameter('mode').value]
         self.cfg.filter.alpha = self.get_parameter('alpha').value
         self.cfg.filter.T_horizon = self.get_parameter('t_horizon').value
@@ -63,6 +67,8 @@ class SafetyFilterNode(Node):
         self.cfg.filter.w_v = self.get_parameter('w_v').value
         self.cfg.filter.w_w = self.get_parameter('w_w').value
         self.cfg.robot.lookahead = self.get_parameter('lookahead_L').value
+        self.cfg.filter.slack_enabled = self.get_parameter('slack_enabled').value
+        self.cfg.filter.slack_rho = self.get_parameter('slack_rho').value
         self.add_on_set_parameters_callback(self.on_param_change)
 
         self.sub_odom = self.create_subscription(
@@ -83,6 +89,11 @@ class SafetyFilterNode(Node):
             Float64, '/safety_filter/qp_solve_time_ms', 10)
         self.pub_cmd_nominal = self.create_publisher(
             Twist, '/safety_filter/cmd_vel_nominal', 10)
+        # İŞ 1 (Agu 2026): slack degeri -- slack_enabled=False iken veya
+        # kisit zaten saglanabiliyorken daima 0.0 yayinlanir; bu yuzden
+        # topic'i her zaman ac (mod farki metrics_extractor tarafinda,
+        # slack_enabled config metadata'siyla ayirt edilir).
+        self.pub_delta = self.create_publisher(Float64, '/safety_filter/delta', 10)
 
         # Oncelik 5: kosular arasi temiz durum. Filtre node'u kampanya boyunca
         # AYAKTA KALIYOR (her kosuda yeniden baslatilmiyor), bu yuzden onceki
@@ -116,6 +127,10 @@ class SafetyFilterNode(Node):
                 self.cfg.filter.w_w = p.value
             elif p.name == 'lookahead_L':
                 self.cfg.robot.lookahead = p.value
+            elif p.name == 'slack_enabled':
+                self.cfg.filter.slack_enabled = p.value
+            elif p.name == 'slack_rho':
+                self.cfg.filter.slack_rho = p.value
         return SetParametersResult(successful=True)
 
     def on_reset(self, request, response):
@@ -149,7 +164,7 @@ class SafetyFilterNode(Node):
 
         self.get_logger().info(
             f'x_o={self.x_o[:2]} h={info.h:.3f} feasible={info.feasible} '
-            f'u_nom={u_nom} u_safe={u_safe}')
+            f'delta={info.delta:.4f} u_nom={u_nom} u_safe={u_safe}')
 
         out = Twist()
         out.linear.x = float(u_safe[0])
@@ -161,6 +176,10 @@ class SafetyFilterNode(Node):
         h_msg = Float64()
         h_msg.data = float(info.h)
         self.pub_h.publish(h_msg)
+
+        delta_msg = Float64()
+        delta_msg.data = float(info.delta)
+        self.pub_delta.publish(delta_msg)
 
         status_msg = String()
         status_msg.data = 'feasible' if info.feasible else 'infeasible'

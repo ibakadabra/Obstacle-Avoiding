@@ -67,6 +67,7 @@ BAG_TOPICS = [
     '/safety_filter/h_value',
     '/safety_filter/qp_status',
     '/safety_filter/qp_solve_time_ms',
+    '/safety_filter/delta',   # İŞ 1 (Agu 2026): slack degeri
 ]
 
 
@@ -118,7 +119,9 @@ class ScenarioNode(Node):
             cost_normalized=bool(filt.get('cost_normalized', False)),
             w_v=float(filt.get('w_v', 1.0)),
             w_w=float(filt.get('w_w', 1.0)),
-            lookahead_L=lookahead_L)
+            lookahead_L=lookahead_L,
+            slack_enabled=bool(filt.get('slack_enabled', False)),
+            slack_rho=float(filt.get('slack_rho', 500.0)))
 
         obs_start = sc['obstacle']['start']
         self.get_logger().info(f'Engel yeniden konumlandiriliyor: {obs_start}')
@@ -191,12 +194,13 @@ class ScenarioNode(Node):
 
     def _set_filter_params(self, mode: str, alpha: float, t_horizon: float, v_min: float = 0.0,
                             cost_normalized: bool = False, w_v: float = 1.0, w_w: float = 1.0,
-                            lookahead_L: float = 0.10) -> None:
+                            lookahead_L: float = 0.10, slack_enabled: bool = False,
+                            slack_rho: float = 500.0) -> None:
         client = self.create_client(SetParameters, '/safety_filter_node/set_parameters')
         if not client.wait_for_service(timeout_sec=5.0):
             self.get_logger().warn(
                 'safety_filter_node bulunamadi -- mode/alpha/t_horizon/v_min/cost/'
-                'lookahead_L parametreleri eski degerinde kaliyor (bu kosu METADATA '
+                'lookahead_L/slack parametreleri eski degerinde kaliyor (bu kosu METADATA '
                 'ile GERCEK filtre davranisi arasinda TUTARSIZ olabilir!).')
             return
         req = SetParameters.Request()
@@ -209,6 +213,8 @@ class ScenarioNode(Node):
             Parameter('w_v', Parameter.Type.DOUBLE, w_v).to_parameter_msg(),
             Parameter('w_w', Parameter.Type.DOUBLE, w_w).to_parameter_msg(),
             Parameter('lookahead_L', Parameter.Type.DOUBLE, lookahead_L).to_parameter_msg(),
+            Parameter('slack_enabled', Parameter.Type.BOOL, slack_enabled).to_parameter_msg(),
+            Parameter('slack_rho', Parameter.Type.DOUBLE, slack_rho).to_parameter_msg(),
         ]
         future = client.call_async(req)
         rclpy.spin_until_future_complete(self, future, timeout_sec=5.0)
@@ -221,7 +227,7 @@ class ScenarioNode(Node):
         self.get_logger().info(
             f'Filtre parametreleri: mode={mode} alpha={alpha} t_horizon={t_horizon} '
             f'v_min={v_min} cost_normalized={cost_normalized} w_v={w_v} w_w={w_w} '
-            f'lookahead_L={lookahead_L}')
+            f'lookahead_L={lookahead_L} slack_enabled={slack_enabled} slack_rho={slack_rho}')
 
     def _reset_state(self) -> None:
         # Robotu once durdur: reset_world konumu sifirlar ama govdedeki

@@ -46,6 +46,17 @@ class FilterParams:
     cost_normalized: bool = False   # False = eski (normalize edilmemis) davranis
     w_v: float = 1.0
     w_w: float = 1.0
+    # SLACK'LI QP (Agu 2026, "Slack'li QP + Parametre Eksenleri" spec'i, İŞ 1):
+    # hard kisit (ḣ >= -alpha*h) infeasible oldugunda QP hic cozum uretmiyor,
+    # kod maksimum fren donduruyordu -- bu, olculmek istenen FIZIKSEL siniri
+    # degil, filtrenin "anlamli komut uretmeyi biraktigi" noktayi olcuyordu.
+    # slack_enabled=True ise kisit gevsetilir: ḣ >= -alpha*h - delta, delta>=0,
+    # maliyete +slack_rho*delta^2 eklenir. Kisit saglanabiliyorsa delta=0 ve
+    # cozum hard versiyonla OZDES (geriye donuk uyumlu); saglanamiyorsa QP
+    # HER ZAMAN cozulur (infeasible durumu ortadan kalkar), delta ihlalin
+    # BUYUKLUGUNU sureklilestirir.
+    slack_enabled: bool = False     # False = eski (hard kisit) davranis
+    slack_rho: float = 500.0        # ihlal cezasi agirligi (normalize maliyet O(1) mertebesinde)
 
     def contact_distance(self, robot: RobotParams, obs: ObstacleParams) -> float:
         """Merkez-merkez fiziksel temas mesafesi (govde+engel yaricaplari).

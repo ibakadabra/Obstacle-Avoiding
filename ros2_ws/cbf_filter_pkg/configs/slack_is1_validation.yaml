@@ -1,0 +1,44 @@
+# İŞ 1 dogrulama kampanyasi: slack'li QP hard versiyonla ne zaman ozdes,
+# ne zaman farkli calisiyor. y=0.3 (ayrisma bandinin cekirdegi) sabit,
+# DCBF sabit, sadece slack_enabled x hiz taraniyor.
+#
+# Kabul kriteri: v=0.8 ve 1.2'de iki varyant istatistiksel olarak ozdes
+# olmali (kisit saglanabiliyor -> delta=0). v=1.4'te slack'li varyantta
+# mudahale cokusu (Bolum 9.6 rapor v3, y=0.3: 9.51 -> 1.14) kaybolmali
+# veya belirgin sekilde yumusamali.
+scenario:
+  name: slack_is1_validation
+  robot:
+    start: [0.0, 0.0, 0.0]
+    cmd: {v: 0.22, omega: 0.0}   # goal_seeking oldugu icin KULLANILMAZ
+  obstacle:
+    start: [3.0, 0.3, 3.14159]
+    velocity: [-0.8, 0.0]        # x-bileseni (index 0) sweep tarafindan ezilir
+  duration: 30.0
+  settle_time: 2.0
+nominal:
+  type: goal_seeking
+  goal: [4.0, 0.0]
+  k_p: 1.5
+  slowdown_radius: 0.5
+  v_max: 0.22
+  omega_max: 2.84
+filter:
+  alpha: 1.0
+  d_safe: 0.5237
+  prediction_horizon: 0.0
+  control_rate: 10.0
+  mode: DCBF
+  v_min: 0.0
+  cost_normalized: true
+  w_v: 1.0
+  w_w: 1.0
+  lookahead_L: 0.10
+  slack_enabled: false          # sweep tarafindan ezilir
+  slack_rho: 500.0
+
+sweep:
+  filter.slack_enabled: [false, true]
+  scenario.obstacle.velocity[0]: [-0.8, -1.2, -1.4]
+runs_per_cell: 10
+# 2 x 3 x 10 = 60 kosu, ~25 dk (duration=30s + settle_time=2s + reset overhead)
