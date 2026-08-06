@@ -61,6 +61,9 @@ CSV_FIELDS = [
     # kalir -- L etkisini guvenlik tanimindan izole eder (params.py
     # FilterParams.d_safe_mode).
     'd_safe_mode',
+    # İŞ 6a: manevra senaryosu tipi (straight/turn/accel) -- T taramasinin
+    # hangi senaryo sinifinda kosuldugu, sonuclarin yorumu icin SART.
+    'trajectory_type',
 ]
 
 # h_min bu esigin ALTINDAYSA gercek ihlal sayilir. Sifir kullanilamaz: CBF
@@ -352,7 +355,7 @@ def extract_one(bag_dir: str, default_contact_distance: float) -> dict:
     contact_distance_str = lookahead_str = ''
     cost_normalized = w_v = w_w = ''
     slack_enabled = slack_rho = ''
-    d_safe_mode = ''
+    d_safe_mode = trajectory_type = ''
     nominal_v = duration = goal_xy = None
     start_x, start_y, v_max_valid = 0.0, 0.0, 0.22
     if os.path.exists(cfg_path):
@@ -378,6 +381,7 @@ def extract_one(bag_dir: str, default_contact_distance: float) -> dict:
         contact_distance_str = filt.get('contact_distance', '')
         lookahead_str = filt.get('lookahead_offset', '')
         sc = cfg.get('scenario', {})
+        trajectory_type = sc.get('obstacle', {}).get('trajectory_type', '')
         nominal_v = sc.get('robot', {}).get('cmd', {}).get('v')
         duration = sc.get('duration')
         nominal_block = cfg.get('nominal', {'type': 'constant'})
@@ -500,6 +504,7 @@ def extract_one(bag_dir: str, default_contact_distance: float) -> dict:
         'delta_active_ratio': _fmt(dm['delta_active_ratio']),
         'delta_first_t_s': _fmt(dm['delta_first_t']),
         'd_safe_mode': d_safe_mode,
+        'trajectory_type': trajectory_type,
     }
     return row
 

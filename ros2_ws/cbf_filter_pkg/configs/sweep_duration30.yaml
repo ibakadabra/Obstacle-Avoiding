@@ -1,0 +1,51 @@
+# ASKIDAKI IS 1 (İŞ 5.4-B'den kalan): duration=30s alt kumesi.
+#
+# GEREKCE: 5.4-B ana izgarasinda goal_reached TUM 60 hucrede sifir
+# cikti -- ama bu bir FILTRE BULGUSU DEGIL, KAMPANYA TASARIM HATASI:
+# duration=15s idi, oysa hedefe (x=4.0 m) v_max=0.22 m/s ile ulasmak
+# EN IYI durumda ~18.2 s gerektiriyor. Yani metrik hic olculemedi.
+#
+# Bu alt kume duration=30s ile ana izgaranin TEMSILI bir kesitini
+# tekrarlar, boylece goal_reached/time_to_goal metrikleri KURTARILIR.
+# Sabitler ana izgarayla AYNI tutuldu (karsilastirilabilirlik icin),
+# SADECE duration degisti.
+scenario:
+  name: dur30
+  robot:
+    start: [0.0, 0.0, 0.0]
+    cmd: {v: 0.22, omega: 0.0}   # goal_seeking oldugu icin KULLANILMAZ
+  obstacle:
+    start: [3.0, 0.3, 3.14159]   # y (index 1) sweep tarafindan ezilir
+    velocity: [-0.8, 0.0]        # x (index 0) sweep tarafindan ezilir
+  duration: 30.0                 # ANA DEGISIKLIK (5.4-B'de 15.0 idi)
+  settle_time: 2.0
+nominal:
+  type: goal_seeking
+  goal: [4.0, 0.0]
+  k_p: 1.5
+  slowdown_radius: 0.5
+  v_max: 0.22
+  omega_max: 2.84
+filter:
+  alpha: 1.0
+  d_safe: 0.5237
+  prediction_horizon: 0.0
+  control_rate: 10.0
+  mode: REACTIVE                 # sweep tarafindan ezilir
+  v_min: 0.0
+  cost_normalized: true
+  w_v: 1.0
+  w_w: 1.0
+  lookahead_L: 0.10
+  # NOT: ana izgara (5.4-B) slack ONCESI kosuldu. Karsilastirilabilirlik
+  # icin slack KAPALI tutuluyor -- bu kampanyanin amaci yeni bir sinir
+  # bulmak degil, ESKI izgaranin eksik metrigini tamamlamak.
+  slack_enabled: false
+
+sweep:
+  scenario.obstacle.velocity[0]: [-0.6, -1.0, -1.4]
+  scenario.obstacle.start[1]: [0.2, 0.3, 0.45]
+  filter.mode: [REACTIVE, DCBF]
+runs_per_cell: 10
+# 3 x 3 x 2 x 10 = 180 kosu (~1.2 saat, duration=30s oldugu icin
+# kosu basi sure 5.4-B'nin ~2 kati).

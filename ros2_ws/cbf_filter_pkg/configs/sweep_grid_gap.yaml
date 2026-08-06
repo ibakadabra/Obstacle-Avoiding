@@ -1,0 +1,49 @@
+# ASKIDAKI IS 2 (İŞ 5.4-B'den kalan): izgara boslugu y=0.35/0.40.
+#
+# GEREKCE: ana izgarada y ekseni {0.0, 0.2, 0.3, 0.45, 0.6} idi. Ama
+# FIZIKSEL GECIS y=0.3737'de (contact_distance = robot 0.1237 + engel
+# 0.25): bu degerin ALTINDA fiziksel temas GEOMETRIK OLARAK MUMKUN,
+# USTUNDE IMKANSIZ (orada asil metrik contact degil margin_violation).
+# Yani 0.30 ile 0.45 arasindaki bosluk, tam da rejim degisiminin
+# oldugu yer -- orasi hic orneklenmedi.
+#
+# y=0.35 (esigin hemen ALTI) ve y=0.40 (hemen USTU) bu gecisi
+# ornekliyor. Sabitler ana izgarayla AYNI (karsilastirilabilirlik).
+scenario:
+  name: gridgap
+  robot:
+    start: [0.0, 0.0, 0.0]
+    cmd: {v: 0.22, omega: 0.0}   # goal_seeking oldugu icin KULLANILMAZ
+  obstacle:
+    start: [3.0, 0.35, 3.14159]  # y (index 1) sweep tarafindan ezilir
+    velocity: [-0.8, 0.0]        # x (index 0) sweep tarafindan ezilir
+  duration: 30.0                 # goal metrikleri de kullanilabilsin
+  settle_time: 2.0
+nominal:
+  type: goal_seeking
+  goal: [4.0, 0.0]
+  k_p: 1.5
+  slowdown_radius: 0.5
+  v_max: 0.22
+  omega_max: 2.84
+filter:
+  alpha: 1.0
+  d_safe: 0.5237
+  prediction_horizon: 0.0
+  control_rate: 10.0
+  mode: REACTIVE                 # sweep tarafindan ezilir
+  v_min: 0.0
+  cost_normalized: true
+  w_v: 1.0
+  w_w: 1.0
+  lookahead_L: 0.10
+  # Ana izgarayla ayni kosullar (slack ONCESI) -- amac izgarayi
+  # TAMAMLAMAK, yeni bir rejim olcmek degil.
+  slack_enabled: false
+
+sweep:
+  scenario.obstacle.velocity[0]: [-0.4, -0.6, -0.8, -1.0, -1.2, -1.4]
+  scenario.obstacle.start[1]: [0.35, 0.40]
+  filter.mode: [REACTIVE, DCBF]
+runs_per_cell: 10
+# 6 x 2 x 2 x 10 = 240 kosu (~2 saat, duration=30s).

@@ -338,6 +338,14 @@ def main():
                 'points_detail': detail,
             })
 
+    # BUG DUZELTMESI (7 Ağu 2026): --dry-run modu ONCEDEN de CSV'ye
+    # yaziyordu -- bir wiring testi boundary_results.csv'ye 12 adet bos
+    # (NaN oranli, NO_CROSSING) satir birakti ve gercek sonuclarla
+    # karisti. Kuru kosu SONUC URETMEZ, dosyaya da yazmamali.
+    if dry_run:
+        print('\n[KURU KOSU] Sonuc dosyasina YAZILMADI (--dry-run).')
+        return
+
     existing = []
     if os.path.exists(BOUNDARY_CSV):
         with open(BOUNDARY_CSV, newline='') as f:

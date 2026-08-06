@@ -1,0 +1,76 @@
+# İŞ 6: T (ongoru ufku) taramasi -- sinir takibiyle.
+#
+# ON KOSUL (6a) KARSILANDI: manevra senaryosu altyapisi eklendi
+# (scenario_node._obstacle_vel_at). GEREKCE: duz giden engelde sabit-hiz
+# tahmini TAM DOGRU -> tahmin hatasi SIFIR -> optimal T* HIC ortaya
+# cikmaz (her T ayni sonucu verir). T*'nin gorunmesi icin engelin
+# sabit-hiz varsayimini KIRMASI sart.
+#
+# Iki senaryo sinifi karsilastiriliyor:
+#   straight : KONTROL GRUBU -- tahmin hatasi yok, v_crit(T) MONOTON
+#              ARTMALI (T ne kadar buyukse o kadar erken uyari, bedelsiz)
+#   turn     : engel manevra penceresinde 30 derece donuyor (hiz
+#              BUYUKLUGU korunuyor) -> model uyusmazligi. BEKLENTI:
+#              v_crit(T) TEPE NOKTALI (T* var) -- kucuk T yetersiz
+#              ongoru, buyuk T yanlis ongoru (engel artik o yone
+#              gitmiyor) => ikisi arasi optimum.
+#   Eger turn'de de MONOTON cikarsa: manevra yeterince siddetli degil,
+#   maneuver_angle_deg buyutulmeli (spec 6c'nin acik notu).
+#
+# mode=SHIFT_CORRECT: T=0'da matematiksel olarak DCBF'e OZDES olmali --
+# her kosuda ucretsiz bir tutarlilik kontrolu.
+mode: boundary_search
+
+scenario:
+  name: bnd_T
+  robot:
+    start: [0.0, 0.0, 0.0]
+    cmd: {v: 0.22, omega: 0.0}   # goal_seeking oldugu icin KULLANILMAZ
+  obstacle:
+    start: [3.0, 0.3, 3.14159]
+    velocity: [-0.8, 0.0]        # search.axis tarafindan ezilir (TABAN hiz)
+    trajectory_type: straight    # sweep tarafindan ezilir
+    maneuver_t0: 2.0             # s -- manevra baslangici
+    maneuver_duration: 1.5       # s -- manevra suresi
+    maneuver_angle_deg: 30.0     # turn icin yon degisimi
+  duration: 30.0
+  settle_time: 2.0
+nominal:
+  type: goal_seeking
+  goal: [4.0, 0.0]
+  k_p: 1.5
+  slowdown_radius: 0.5
+  v_max: 0.22
+  omega_max: 2.84
+filter:
+  alpha: 1.0                     # İŞ 4: bu aralikta ampirik OPTIMAL
+  d_safe: 0.5237
+  prediction_horizon: 0.0        # sweep tarafindan ezilir
+  control_rate: 10.0
+  mode: SHIFT_CORRECT
+  v_min: 0.0
+  cost_normalized: true
+  w_v: 1.0
+  w_w: 1.0
+  lookahead_L: 0.10
+  slack_enabled: true            # İŞ 1: ZORUNLU
+  slack_rho: 500.0
+  d_safe_mode: derived           # L sabit oldugu icin fark etmez
+
+search:
+  axis: scenario.obstacle.velocity[0]
+  sign: -1
+  coarse_points: [0.6, 0.9, 1.2, 1.5]
+  refine_steps: 2
+  target_metrics: [contact_rate, margin_violation_rate, delta_active_rate]
+  target_value: 0.5
+  runs_per_point: 10
+
+fixed:
+  scenario.obstacle.start[1]: 0.3
+
+sweep:
+  filter.prediction_horizon: [0.0, 0.25, 0.5, 1.0, 1.5, 2.0]
+  scenario.obstacle.trajectory_type: [straight, turn]
+# 12 hucre x (4 kaba + 3 metrik x 2 inceltme) x 10 = EN FAZLA ~1200 kosu,
+# onbellek sayesinde pratikte ~700-750 (~6 saat).

@@ -83,6 +83,25 @@ class ScenarioNode(Node):
 
         self.robot_cmd = np.array([sc['robot']['cmd']['v'], sc['robot']['cmd']['omega']])
         self.obstacle_vel = np.array(sc['obstacle']['velocity'])
+        # İŞ 6 (Ağu 2026, "Slack'li QP + Parametre Eksenleri" spec'i 6a):
+        # MANEVRA SENARYOSU. T (ongoru ufku) taramasinin ANLAMLI olmasi
+        # icin engelin sabit-hiz varsayimini KIRMASI sart -- duz giden
+        # engelde sabit-hiz tahmini TAM DOGRU oldugu icin tahmin hatasi
+        # sifir olur ve optimal T* hic ortaya cikmaz (her T ayni sonucu
+        # verir, monoton artis). Manevra profili taban hizdan TURETILIR,
+        # boylece boundary_search'un hiz ekseni (velocity[0]) manevrali
+        # senaryolarda da calisir.
+        #   straight : sabit hiz (KONTROL GRUBU, eski davranisla ozdes)
+        #   turn     : manevra penceresinde hiz vektoru DONDURULUR (hiz
+        #              BUYUKLUGU korunur, yon degisir -> saf yon hatasi)
+        #   accel    : manevra penceresinde hiz BUYUKLUGU olceklenir
+        #              (yon korunur -> saf buyukluk hatasi)
+        obs = sc['obstacle']
+        self.traj_type = obs.get('trajectory_type', 'straight')
+        self.man_t0 = float(obs.get('maneuver_t0', 2.0))       # s, manevra baslangici
+        self.man_dur = float(obs.get('maneuver_duration', 1.5))  # s, manevra suresi
+        self.man_angle = float(obs.get('maneuver_angle_deg', 30.0))  # turn icin
+        self.man_scale = float(obs.get('maneuver_speed_scale', 1.5))  # accel icin
         self.duration = float(sc['duration'])
         self.rate_hz = float(cfg.get('filter', {}).get('control_rate', 20.0))
         settle_time = float(sc.get('settle_time', 2.0))
@@ -291,8 +310,32 @@ class ScenarioNode(Node):
             omega_max=float(self.nominal_cfg.get('omega_max', 2.84)))
         return np.array([v_nom, w_nom])
 
+    def _obstacle_vel_at(self, t_elapsed: float) -> np.ndarray:
+        """İŞ 6a: o anki engel hizi. trajectory_type='straight' iken
+        eski davranisla BIREBIR ayni (sabit hiz). Manevra profilleri
+        TABAN HIZDAN turetilir -- boylece boundary_search'un hiz ekseni
+        (velocity[0] uzerinden) manevrali senaryolarda da gecerli kalir."""
+        base = self.obstacle_vel
+        if self.traj_type == 'straight':
+            return base
+        in_window = self.man_t0 <= t_elapsed < (self.man_t0 + self.man_dur)
+        if not in_window:
+            return base
+        if self.traj_type == 'turn':
+            # Hiz vektorunu dondur: BUYUKLUK korunur, sadece yon degisir.
+            # Sabit-hiz tahmincisi icin saf bir YON hatasi kaynagi.
+            a = np.radians(self.man_angle)
+            ca, sa = np.cos(a), np.sin(a)
+            return np.array([base[0] * ca - base[1] * sa,
+                             base[0] * sa + base[1] * ca])
+        if self.traj_type == 'accel':
+            # Yon korunur, BUYUKLUK olceklenir -- saf buyukluk hatasi.
+            return base * self.man_scale
+        return base
+
     def _tick(self) -> None:
         self.n_ticks += 1
+        t_elapsed = self.n_ticks / self.rate_hz
 
         cmd = self._nominal_cmd()
         robot_msg = Twist()
@@ -300,9 +343,10 @@ class ScenarioNode(Node):
         robot_msg.angular.z = float(cmd[1])
         self.pub_robot_cmd.publish(robot_msg)
 
+        obs_vel = self._obstacle_vel_at(t_elapsed)
         obs_msg = Twist()
-        obs_msg.linear.x = float(self.obstacle_vel[0])
-        obs_msg.linear.y = float(self.obstacle_vel[1])
+        obs_msg.linear.x = float(obs_vel[0])
+        obs_msg.linear.y = float(obs_vel[1])
         self.pub_obstacle_cmd.publish(obs_msg)
 
         if self.n_ticks >= self.max_ticks:

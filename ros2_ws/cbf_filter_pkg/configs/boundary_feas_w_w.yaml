@@ -1,0 +1,57 @@
+# FEASIBILITY SINIRI YENIDEN TARAMASI (w_w ekseni).
+#
+# GEREKCE: İŞ 3/4/5 kampanyalarinda `delta_active_rate` (feasibility
+# siniri) 11 hucrenin 9'unda ALL_ABOVE cikti -- yani sinir, kaba
+# taramanin EN DUSUK noktasi olan v=0.6'nin bile ALTINDA. Gercek
+# v_crit OLCULEMEDI, sadece "<0.6" biliniyor. Uc sinir egrisinden
+# biri bu yuzden eksik veri.
+#
+# Bu kampanya SADECE delta_active_rate'i ariyor (contact/margin zaten
+# olculdu) ve kaba tarama araligini ASAGI cekiyor: [0.3, 0.45, 0.6, 0.9].
+mode: boundary_search
+
+scenario:
+  name: bnd_feas_w_w
+  robot:
+    start: [0.0, 0.0, 0.0]
+    cmd: {v: 0.22, omega: 0.0}   # goal_seeking oldugu icin KULLANILMAZ
+  obstacle:
+    start: [3.0, 0.3, 3.14159]
+    velocity: [-0.8, 0.0]        # search.axis tarafindan ezilir
+  duration: 30.0
+  settle_time: 2.0
+nominal:
+  type: goal_seeking
+  goal: [4.0, 0.0]
+  k_p: 1.5
+  slowdown_radius: 0.5
+  v_max: 0.22
+  omega_max: 2.84
+filter:
+  alpha: 1.0
+  d_safe: 0.5237
+  prediction_horizon: 0.0
+  control_rate: 10.0
+  mode: DCBF
+  v_min: 0.0
+  cost_normalized: true
+  w_v: 1.0
+  w_w: 1.0                       # sweep tarafindan ezilir
+  lookahead_L: 0.10
+  slack_enabled: true            # İŞ 1: ZORUNLU, aksi halde olculen sinir
+  slack_rho: 500.0               # fallback politikasinin artefakti olur
+
+search:
+  axis: scenario.obstacle.velocity[0]
+  sign: -1
+  coarse_points: [0.3, 0.45, 0.6, 0.9]
+  refine_steps: 2
+  target_metrics: [delta_active_rate]
+  target_value: 0.5
+  runs_per_point: 10
+
+fixed:
+  scenario.obstacle.start[1]: 0.3
+
+sweep:
+  filter.w_w: [0.25, 0.5, 1.0, 2.0]
