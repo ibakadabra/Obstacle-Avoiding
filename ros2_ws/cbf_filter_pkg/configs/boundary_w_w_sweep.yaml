@@ -1,0 +1,67 @@
+# İŞ 3: maliyet agirligi taramasi (w_w/w_v) -- sinir takibiyle.
+#
+# GEREKCE: İŞ 5.4-A normalizasyonu birim artefaktini kaldirdi, ama
+# w_w/w_v oraninin "dogru" degeri diye bir sey yok -- bu, filtrenin neyi
+# tercih edecegini kodlayan bir TASARIM PARAMETRESI. Su an w_v=w_w=1.0
+# bir VARSAYILAN, karar degil.
+#
+# Fiziksel argüman omega'nin daha ucuz olmasi yonunde: durmak yanal yer
+# degistirme uretmez, donmek uretir. Veride de gorunuyor -- omega payinin
+# dustugu her yerde carpisma var (İŞ 5.4-B: v=1.4'te omega_share
+# 0.99 -> 0.57 duserken contact 0 -> 1).
+#
+# Bu kampanya sonunda "esit agirlik sectik" yerine "agirlik oraninin
+# siniri nasil kaydirdigini karakterize ettik ve sunu sectik" denebilir.
+#
+# w_v = 1.0 SABIT, w_w taraniyor:
+#   w_w < 1  -> donmek UCUZ  (filtre donmeyi tercih etmeli)
+#   w_w > 1  -> donmek PAHALI (filtre frenlemeyi tercih etmeli)
+mode: boundary_search
+
+scenario:
+  name: bnd_w_w
+  robot:
+    start: [0.0, 0.0, 0.0]
+    cmd: {v: 0.22, omega: 0.0}   # goal_seeking oldugu icin KULLANILMAZ
+  obstacle:
+    start: [3.0, 0.3, 3.14159]
+    velocity: [-0.8, 0.0]        # search.axis tarafindan ezilir
+  duration: 30.0
+  settle_time: 2.0
+nominal:
+  type: goal_seeking
+  goal: [4.0, 0.0]
+  k_p: 1.5
+  slowdown_radius: 0.5
+  v_max: 0.22
+  omega_max: 2.84
+filter:
+  alpha: 1.0
+  d_safe: 0.5237
+  prediction_horizon: 0.0
+  control_rate: 10.0
+  mode: DCBF
+  v_min: 0.0
+  cost_normalized: true
+  w_v: 1.0
+  w_w: 1.0                       # sweep tarafindan ezilir
+  lookahead_L: 0.10
+  slack_enabled: true            # İŞ 1: ZORUNLU, aksi halde olculen sinir
+  slack_rho: 500.0               # fallback politikasinin artefakti olur
+
+search:
+  axis: scenario.obstacle.velocity[0]
+  sign: -1
+  coarse_points: [0.6, 0.9, 1.2, 1.5]
+  refine_steps: 2
+  target_metrics: [contact_rate, margin_violation_rate, delta_active_rate]
+  target_value: 0.5
+  runs_per_point: 10
+
+fixed:
+  scenario.obstacle.start[1]: 0.3
+
+sweep:
+  filter.w_w: [0.25, 0.5, 1.0, 2.0]
+# 4 hucre x (4 kaba + 3 metrik x 2 inceltme) x 10 = EN FAZLA 400 kosu,
+# onbellek sayesinde pratikte daha az (~250-300, ~2.5-3 saat).
