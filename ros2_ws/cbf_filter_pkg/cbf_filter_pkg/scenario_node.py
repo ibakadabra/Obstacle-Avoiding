@@ -121,7 +121,9 @@ class ScenarioNode(Node):
             w_w=float(filt.get('w_w', 1.0)),
             lookahead_L=lookahead_L,
             slack_enabled=bool(filt.get('slack_enabled', False)),
-            slack_rho=float(filt.get('slack_rho', 500.0)))
+            slack_rho=float(filt.get('slack_rho', 500.0)),
+            d_safe_mode=filt.get('d_safe_mode', 'derived'),
+            d_safe_fixed=float(filt.get('d_safe_fixed', 0.5237)))
 
         obs_start = sc['obstacle']['start']
         self.get_logger().info(f'Engel yeniden konumlandiriliyor: {obs_start}')
@@ -151,6 +153,8 @@ class ScenarioNode(Node):
         # ayni formul, sorgu round-trip'i yok.
         geom_cfg = _Config()
         geom_cfg.robot.lookahead = lookahead_L
+        geom_cfg.filter.d_safe_mode = filt.get('d_safe_mode', 'derived')
+        geom_cfg.filter.d_safe_fixed = float(filt.get('d_safe_fixed', 0.5237))
         cfg.setdefault('filter', {}).update({
             'lookahead_offset': lookahead_L,
             'contact_distance': geom_cfg.filter.contact_distance(geom_cfg.robot, geom_cfg.obstacle),
@@ -195,7 +199,8 @@ class ScenarioNode(Node):
     def _set_filter_params(self, mode: str, alpha: float, t_horizon: float, v_min: float = 0.0,
                             cost_normalized: bool = False, w_v: float = 1.0, w_w: float = 1.0,
                             lookahead_L: float = 0.10, slack_enabled: bool = False,
-                            slack_rho: float = 500.0) -> None:
+                            slack_rho: float = 500.0, d_safe_mode: str = 'derived',
+                            d_safe_fixed: float = 0.5237) -> None:
         client = self.create_client(SetParameters, '/safety_filter_node/set_parameters')
         if not client.wait_for_service(timeout_sec=5.0):
             self.get_logger().warn(
@@ -215,6 +220,8 @@ class ScenarioNode(Node):
             Parameter('lookahead_L', Parameter.Type.DOUBLE, lookahead_L).to_parameter_msg(),
             Parameter('slack_enabled', Parameter.Type.BOOL, slack_enabled).to_parameter_msg(),
             Parameter('slack_rho', Parameter.Type.DOUBLE, slack_rho).to_parameter_msg(),
+            Parameter('d_safe_mode', Parameter.Type.STRING, d_safe_mode).to_parameter_msg(),
+            Parameter('d_safe_fixed', Parameter.Type.DOUBLE, d_safe_fixed).to_parameter_msg(),
         ]
         future = client.call_async(req)
         rclpy.spin_until_future_complete(self, future, timeout_sec=5.0)
@@ -227,7 +234,8 @@ class ScenarioNode(Node):
         self.get_logger().info(
             f'Filtre parametreleri: mode={mode} alpha={alpha} t_horizon={t_horizon} '
             f'v_min={v_min} cost_normalized={cost_normalized} w_v={w_v} w_w={w_w} '
-            f'lookahead_L={lookahead_L} slack_enabled={slack_enabled} slack_rho={slack_rho}')
+            f'lookahead_L={lookahead_L} slack_enabled={slack_enabled} slack_rho={slack_rho} '
+            f'd_safe_mode={d_safe_mode} d_safe_fixed={d_safe_fixed}')
 
     def _reset_state(self) -> None:
         # Robotu once durdur: reset_world konumu sifirlar ama govdedeki

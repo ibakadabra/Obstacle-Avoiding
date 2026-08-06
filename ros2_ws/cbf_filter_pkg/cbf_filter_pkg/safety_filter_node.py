@@ -59,6 +59,10 @@ class SafetyFilterNode(Node):
         # slack degiskeni -- bkz. params.py FilterParams, cbf.py safety_filter.
         self.declare_parameter('slack_enabled', False)
         self.declare_parameter('slack_rho', 500.0)
+        # İŞ 5: d_safe_mode='fixed' iken L degisse bile guvenlik tanimi
+        # SABIT kalir -- bkz. params.py FilterParams.d_safe_mode.
+        self.declare_parameter('d_safe_mode', 'derived')
+        self.declare_parameter('d_safe_fixed', 0.5237)
         self.mode = Mode[self.get_parameter('mode').value]
         self.cfg.filter.alpha = self.get_parameter('alpha').value
         self.cfg.filter.T_horizon = self.get_parameter('t_horizon').value
@@ -69,6 +73,8 @@ class SafetyFilterNode(Node):
         self.cfg.robot.lookahead = self.get_parameter('lookahead_L').value
         self.cfg.filter.slack_enabled = self.get_parameter('slack_enabled').value
         self.cfg.filter.slack_rho = self.get_parameter('slack_rho').value
+        self.cfg.filter.d_safe_mode = self.get_parameter('d_safe_mode').value
+        self.cfg.filter.d_safe_fixed = self.get_parameter('d_safe_fixed').value
         self.add_on_set_parameters_callback(self.on_param_change)
 
         self.sub_odom = self.create_subscription(
@@ -131,6 +137,10 @@ class SafetyFilterNode(Node):
                 self.cfg.filter.slack_enabled = p.value
             elif p.name == 'slack_rho':
                 self.cfg.filter.slack_rho = p.value
+            elif p.name == 'd_safe_mode':
+                self.cfg.filter.d_safe_mode = p.value
+            elif p.name == 'd_safe_fixed':
+                self.cfg.filter.d_safe_fixed = p.value
         return SetParametersResult(successful=True)
 
     def on_reset(self, request, response):

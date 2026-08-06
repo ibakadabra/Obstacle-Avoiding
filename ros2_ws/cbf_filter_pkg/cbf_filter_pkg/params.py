@@ -57,6 +57,21 @@ class FilterParams:
     # BUYUKLUGUNU sureklilestirir.
     slack_enabled: bool = False     # False = eski (hard kisit) davranis
     slack_rho: float = 500.0        # ihlal cezasi agirligi (normalize maliyet O(1) mertebesinde)
+    # İŞ 5 (Ağu 2026, "Slack'li QP + Parametre Eksenleri" spec'i): L
+    # (lookahead) tarandiginda d_safe = contact_distance+L+margin FORMULU
+    # NEDENIYLE guvenlik TANIMI da degisir -- farkli L'ler aslinda farkli
+    # PROBLEMLERI karsilastirir, adil bir "L etkisi" karsilastirmasi olmaz.
+    # d_safe_mode='fixed' (spec'in ONERDIGI secenek): d_safe SABIT tutulur
+    # (d_safe_fixed), sadece filtre YAPISI (L) degisir -- ayni guvenlik
+    # spesifikasyonu, farkli formulasyon. UYARI: L buyudukce fiziksel marj
+    # daralir (orn. L=0.30: 0.5237-0.30=0.224 < temas_mesafesi=0.3737),
+    # yani h>=0 artik TEMASA KARSI garanti VERMEYEBILIR -- bu bilerek
+    # yapiliyor, sonuclarla birlikte raporlanmali.
+    # d_safe_mode='derived' (ONCEKI/varsayilan davranis): d_safe = contact+L+margin,
+    # L ile birlikte BUYUR -- tutarli garanti ama L artisinin faydasi
+    # konservatiflik maliyetiyle KARISIR, ayristirilamaz.
+    d_safe_mode: str = 'derived'    # 'derived' (eski/varsayilan) | 'fixed'
+    d_safe_fixed: float = 0.5237
 
     def contact_distance(self, robot: RobotParams, obs: ObstacleParams) -> float:
         """Merkez-merkez fiziksel temas mesafesi (govde+engel yaricaplari).
@@ -77,6 +92,12 @@ class FilterParams:
         # (Olcum: REACTIVE modda ham merkez-merkez d_min=0.3553 iken h_min
         # hala ~0 civariydi -- kisit "saglaniyor" gorunurken govde zaten
         # contact_distance=0.3737'nin altina inmisti. Bu formul o acigi kapatir.)
+        #
+        # İŞ 5: d_safe_mode='fixed' iken bu turetilmis formul BYPASS edilir,
+        # d_safe_fixed dogrudan donulur -- L degisse bile guvenlik tanimi
+        # SABIT kalir (bkz. FilterParams.d_safe_mode dokumantasyonu).
+        if self.d_safe_mode == 'fixed':
+            return self.d_safe_fixed
         return self.contact_distance(robot, obs) + robot.lookahead + self.d_margin
 
 

@@ -57,6 +57,10 @@ CSV_FIELDS = [
     # safety_filter, params.py FilterParams.slack_enabled/slack_rho.
     'slack_enabled', 'slack_rho',
     'delta_max', 'delta_integral', 'delta_active_ratio', 'delta_first_t_s',
+    # İŞ 5: d_safe_mode='fixed' iken lookahead_L degisse bile d_safe SABIT
+    # kalir -- L etkisini guvenlik tanimindan izole eder (params.py
+    # FilterParams.d_safe_mode).
+    'd_safe_mode',
 ]
 
 # h_min bu esigin ALTINDAYSA gercek ihlal sayilir. Sifir kullanilamaz: CBF
@@ -348,6 +352,7 @@ def extract_one(bag_dir: str, default_contact_distance: float) -> dict:
     contact_distance_str = lookahead_str = ''
     cost_normalized = w_v = w_w = ''
     slack_enabled = slack_rho = ''
+    d_safe_mode = ''
     nominal_v = duration = goal_xy = None
     start_x, start_y, v_max_valid = 0.0, 0.0, 0.22
     if os.path.exists(cfg_path):
@@ -365,6 +370,7 @@ def extract_one(bag_dir: str, default_contact_distance: float) -> dict:
         w_w = filt.get('w_w', '')
         slack_enabled = filt.get('slack_enabled', False)
         slack_rho = filt.get('slack_rho', '')
+        d_safe_mode = filt.get('d_safe_mode', '')
         # ISI 1 duzeltmesinden SONRAKI kosularda scenario_node bunlari
         # filtrenin CANLI parametrelerinden yazar (bkz. scenario_node.py
         # _get_live_filter_geometry) -- ONCEKI kosularda yok, DEFAULT'a
@@ -493,6 +499,7 @@ def extract_one(bag_dir: str, default_contact_distance: float) -> dict:
         'delta_integral': _fmt(dm['delta_integral']),
         'delta_active_ratio': _fmt(dm['delta_active_ratio']),
         'delta_first_t_s': _fmt(dm['delta_first_t']),
+        'd_safe_mode': d_safe_mode,
     }
     return row
 

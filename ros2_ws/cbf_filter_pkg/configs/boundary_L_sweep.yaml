@@ -1,0 +1,65 @@
+# İŞ 5: lookahead kolu (L) taramasi -- sinir takibiyle.
+#
+# ONEMLI KARAR: d_safe = contact_distance + L + margin FORMULU NEDENIYLE
+# L'yi degistirmek guvenlik TANIMINI da degistirir -- farkli L'ler farkli
+# PROBLEMLERI karsilastirir, adil bir "L etkisi" olcumu olmaz.
+#
+# BU KAMPANYA SECENEK A'yi (ONERILEN) kullanir: d_safe_mode=fixed,
+# d_safe SABIT (0.5237) tutulur, sadece filtre YAPISI (L) degisir --
+# ayni guvenlik spesifikasyonu, farkli formulasyon.
+#
+# UYARI: L=0.30'da fiziksel marj daralir (0.5237-0.30=0.2237 < temas
+# mesafesi 0.3737), yani h>=0 artik TEMASA KARSI garanti VERMEYEBILIR --
+# bu BILEREK yapiliyor, contact_rate sonuclariyla birlikte
+# raporlanmali (marj sinirinin garanti disina cikip cikmadigi gorulecek).
+mode: boundary_search
+
+scenario:
+  name: bnd_L
+  robot:
+    start: [0.0, 0.0, 0.0]
+    cmd: {v: 0.22, omega: 0.0}   # goal_seeking oldugu icin KULLANILMAZ
+  obstacle:
+    start: [3.0, 0.3, 3.14159]
+    velocity: [-0.8, 0.0]        # search.axis tarafindan ezilir
+  duration: 30.0
+  settle_time: 2.0
+nominal:
+  type: goal_seeking
+  goal: [4.0, 0.0]
+  k_p: 1.5
+  slowdown_radius: 0.5
+  v_max: 0.22
+  omega_max: 2.84
+filter:
+  alpha: 1.0
+  d_safe: 0.5237
+  prediction_horizon: 0.0
+  control_rate: 10.0
+  mode: DCBF
+  v_min: 0.0
+  cost_normalized: true
+  w_v: 1.0
+  w_w: 1.0
+  lookahead_L: 0.10              # sweep tarafindan ezilir
+  slack_enabled: true            # İŞ 1: ZORUNLU
+  slack_rho: 500.0
+  d_safe_mode: fixed             # İŞ 5 karari: Secenek A
+  d_safe_fixed: 0.5237
+
+search:
+  axis: scenario.obstacle.velocity[0]
+  sign: -1
+  coarse_points: [0.6, 0.9, 1.2, 1.5]
+  refine_steps: 2
+  target_metrics: [contact_rate, margin_violation_rate, delta_active_rate]
+  target_value: 0.5
+  runs_per_point: 10
+
+fixed:
+  scenario.obstacle.start[1]: 0.3
+
+sweep:
+  filter.lookahead_L: [0.10, 0.20, 0.30]
+# 3 hucre x (4 kaba + 3 metrik x 2 inceltme) x 10 = EN FAZLA ~300 kosu,
+# onbellek sayesinde pratikte daha az (~1.5-2 saat).
