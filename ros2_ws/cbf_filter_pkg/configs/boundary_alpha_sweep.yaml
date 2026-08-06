@@ -1,0 +1,60 @@
+# İŞ 4: α (CBF sınıf-K katsayısı) taramasi -- sinir takibiyle.
+#
+# α, mudahalenin ZAMANLAMASINI belirliyor: kucuk α = erken ve yumusak
+# mudahale (h buyukken bile h_dot'u kisitliyor), buyuk α = gec ve sert
+# mudahale (kisit sadece h sifira yaklasinca bagliyor). Su ana kadar
+# tum kampanyalar α=1.0 SABIT ile kosuldu -- bu da bir varsayimdi.
+#
+# w_v=w_w=1.0 SABIT tutuluyor (İŞ 3'un sonucu henuz bilinmiyor; iki
+# eksen BAGIMSIZ once tek tek taraniyor, gerekirse İŞ 7'de etkilesim
+# kose testleriyle capraz kontrol edilecek).
+mode: boundary_search
+
+scenario:
+  name: bnd_alpha
+  robot:
+    start: [0.0, 0.0, 0.0]
+    cmd: {v: 0.22, omega: 0.0}   # goal_seeking oldugu icin KULLANILMAZ
+  obstacle:
+    start: [3.0, 0.3, 3.14159]
+    velocity: [-0.8, 0.0]        # search.axis tarafindan ezilir
+  duration: 30.0
+  settle_time: 2.0
+nominal:
+  type: goal_seeking
+  goal: [4.0, 0.0]
+  k_p: 1.5
+  slowdown_radius: 0.5
+  v_max: 0.22
+  omega_max: 2.84
+filter:
+  alpha: 1.0                     # sweep tarafindan ezilir
+  d_safe: 0.5237
+  prediction_horizon: 0.0
+  control_rate: 10.0
+  mode: DCBF
+  v_min: 0.0
+  cost_normalized: true
+  w_v: 1.0
+  w_w: 1.0
+  lookahead_L: 0.10
+  slack_enabled: true            # İŞ 1: ZORUNLU
+  slack_rho: 500.0
+
+search:
+  axis: scenario.obstacle.velocity[0]
+  sign: -1
+  coarse_points: [0.6, 0.9, 1.2, 1.5]
+  refine_steps: 2
+  target_metrics: [contact_rate, margin_violation_rate, delta_active_rate]
+  target_value: 0.5
+  runs_per_point: 10
+
+fixed:
+  scenario.obstacle.start[1]: 0.3
+
+sweep:
+  filter.alpha: [0.3, 0.5, 1.0, 2.0]
+# 4 hucre x (4 kaba + 3 metrik x 2 inceltme) x 10 = EN FAZLA ~400 kosu,
+# onbellek sayesinde pratikte daha az (İŞ 3'te 152/400 cikti, benzer
+# oran beklenir -> ~2-2.5 saat).
