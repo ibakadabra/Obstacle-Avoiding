@@ -41,7 +41,8 @@ CSV_FIELDS = [
     'alpha', 'd_safe', 'lookahead_offset_m', 'v_min_param', 'mode', 'control_rate', 'prediction_horizon',
     'cost_normalized', 'w_v', 'w_w', 'obstacle_velocity_source',
     'd_min', 'd_eff_min', 'contact_distance', 'h_at_contact', 'contact',
-    'margin_violation', 'penetration_depth_m',
+    'margin_violation', 'body_margin_violation', 'body_margin_depth_m',
+    'penetration_depth_m',
     'qp_infeasible_count', 'qp_infeasible_any',
     'h_min',
     'solve_time_mean_ms', 'solve_time_max_ms',
@@ -57,6 +58,9 @@ CSV_FIELDS = [
     # safety_filter, params.py FilterParams.slack_enabled/slack_rho.
     'slack_enabled', 'slack_rho',
     'delta_max', 'delta_integral', 'delta_active_ratio', 'delta_first_t_s',
+    # DUZELTME 2: kisit-olcegine normalize delta + uc esikte duyarlilik.
+    'delta_rel_max', 'delta_rel_integral',
+    'delta_active_ratio_001', 'delta_active_ratio_005', 'delta_active_ratio_010',
     # İŞ 5: d_safe_mode='fixed' iken lookahead_L degisse bile d_safe SABIT
     # kalir -- L etkisini guvenlik tanimindan izole eder (params.py
     # FilterParams.d_safe_mode).
@@ -101,6 +105,7 @@ def _read_bag(bag_dir: str) -> dict:
 
     robot_xy, obstacle_xy = [], []
     h_values, qp_statuses, solve_times = [], [], []
+    h_t = []              # (t_s, h)                -- /safety_filter/h_value ZAMANLI
     odom_t = []          # (t_s, x, y, v_actual)  -- /odom, v_actual=twist.linear.x
     obstacle_t = []       # (t_s, x, y)            -- /moving_obstacle/odom, ZAMANLI
     cmd_actual = []       # (t_s, v, w)            -- /cmd_vel (u_safe, filtreden SONRA)
@@ -126,6 +131,7 @@ def _read_bag(bag_dir: str) -> dict:
             obstacle_t.append((t_s, p.x, p.y))
         elif topic == '/safety_filter/h_value':
             h_values.append(msg.data)
+            h_t.append((t_s, msg.data))
         elif topic == '/safety_filter/delta':
             delta_t.append((t_s, msg.data))
         elif topic == '/safety_filter/qp_status':
@@ -139,7 +145,7 @@ def _read_bag(bag_dir: str) -> dict:
 
     return dict(robot_xy=robot_xy, obstacle_xy=obstacle_xy, h_values=h_values,
                 qp_statuses=qp_statuses, solve_times=solve_times, n_msgs=n_msgs,
-                odom_t=odom_t, obstacle_t=obstacle_t,
+                odom_t=odom_t, obstacle_t=obstacle_t, h_t=h_t,
                 cmd_actual=cmd_actual, cmd_nominal=cmd_nominal, delta_t=delta_t)
 
 
@@ -315,36 +321,75 @@ def _intervention_metrics(cmd_actual, cmd_nominal):
                 v_integral=v_integral, w_integral=w_integral, omega_share=omega_share)
 
 
-def _delta_metrics(delta_t, t0):
-    """İŞ 1 (Agu 2026, "Slack'li QP" spec'i): slack degerinin (δ) zaman
-    serisinden dort metrik. delta_t bos ise (slack_enabled=False'lu eski
-    kayitlarda topic hic yayinlanmamis olabilir, veya delta_enabled=True
-    ama hicbir tick'te QP cozulmemisse) hepsi NaN/bos doner -- 0.0 DEGIL,
-    cunku "hic olculmedi" ile "olculdu ve hep sifirdi" ayri seyler."""
+def _delta_metrics(delta_t, h_t, alpha, t0):
+    """İŞ 1 + DUZELTME 2 (BOUNDARY_ANALYSIS_FIX_SPEC, 7 Ağu 2026): slack
+    degerinin (δ) zaman serisinden metrikler.
+
+    KOK SORUN: ham δ tek basina ANLAMSIZ -- δ>0 sayilirsa sayisal artik
+    neredeyse her kontrol adiminda pozitif cikar ve delta_active_ratio
+    her zaman ~1 olur (11 hucrenin 9'unda ALL_ABOVE). Cozum: δ'yi KISIT
+    OLCEGINE normalize et:
+        delta_rel = δ / max(|alpha·h|, eps)
+    Kisit  h_dot >= -alpha*h - δ  oldugu icin, δ'nin anlamli olmasi ancak
+    kisitin sag tarafi (-alpha*h) buyuklugune GORE degerlendirilince olur.
+    delta_active = delta_rel > esik (varsayilan %1).
+
+    delta_t ve h_t AYNI callback'ten (on_cmd_nom) art arda yayinlandigi
+    icin INDEKSE gore eslestirilir. Uc esikte (0.01/0.05/0.10) ayri ayri
+    delta_active_ratio doner -- esik keyfi oldugu icin duyarlilik analizi
+    (spec zorunlu kildi).
+    """
+    NAN = float('nan')
+    empty = dict(delta_max=NAN, delta_integral=NAN, delta_first_t=NAN,
+                 delta_rel_max=NAN, delta_rel_integral=NAN,
+                 delta_active_ratio_001=NAN, delta_active_ratio_005=NAN,
+                 delta_active_ratio_010=NAN, delta_active_ratio=NAN)
     if not delta_t or t0 != t0:
-        return dict(delta_max=float('nan'), delta_integral=float('nan'),
-                    delta_active_ratio=float('nan'), delta_first_t=float('nan'))
-    ts = [t for t, _ in delta_t]
-    ds = [d for _, d in delta_t]
+        return empty
+    n = min(len(delta_t), len(h_t)) if h_t else len(delta_t)
+    if n == 0:
+        return empty
+    ts = [delta_t[i][0] for i in range(n)]
+    ds = [delta_t[i][1] for i in range(n)]
+    hs = [h_t[i][1] for i in range(n)] if h_t else [0.0] * n
+    eps = 1e-6
+
+    # ham δ (geriye donuk: eski delta_max/integral hala uretilir)
     delta_max = max(ds)
-    delta_integral = 0.0
-    active_duration = 0.0
-    for i in range(1, len(delta_t)):
+    # normalize δ_rel
+    d_rel = [abs(ds[i]) / max(abs(alpha * hs[i]), eps) for i in range(n)]
+    delta_rel_max = max(d_rel)
+
+    thresholds = {'001': 0.01, '005': 0.05, '010': 0.10}
+    active_dur = {k: 0.0 for k in thresholds}
+    delta_integral = delta_rel_integral = 0.0
+    for i in range(1, n):
         dt = ts[i] - ts[i - 1]
         delta_integral += 0.5 * (ds[i] + ds[i - 1]) * dt
-        if ds[i] > DELTA_ACTIVE_THRESH:
-            active_duration += dt
-    total_duration = ts[-1] - ts[0] if len(ts) > 1 else float('nan')
-    delta_active_ratio = (active_duration / total_duration
-                           if total_duration == total_duration and total_duration > 0
-                           else float('nan'))
-    delta_first_t = float('nan')
-    for t, d in delta_t:
-        if d > DELTA_ACTIVE_THRESH:
-            delta_first_t = t - t0
+        delta_rel_integral += 0.5 * (d_rel[i] + d_rel[i - 1]) * dt
+        for k, thr in thresholds.items():
+            if d_rel[i] > thr:
+                active_dur[k] += dt
+    total = ts[-1] - ts[0] if n > 1 else NAN
+    ratios = {k: (active_dur[k] / total if total == total and total > 0 else NAN)
+              for k in thresholds}
+
+    # delta_first_t: delta_rel'in ILK 0.01 esigini astigi an (birincil esik)
+    delta_first_t = NAN
+    for i in range(n):
+        if d_rel[i] > 0.01:
+            delta_first_t = ts[i] - t0
             break
+
     return dict(delta_max=delta_max, delta_integral=delta_integral,
-                delta_active_ratio=delta_active_ratio, delta_first_t=delta_first_t)
+                delta_first_t=delta_first_t,
+                delta_rel_max=delta_rel_max, delta_rel_integral=delta_rel_integral,
+                delta_active_ratio_001=ratios['001'],
+                delta_active_ratio_005=ratios['005'],
+                delta_active_ratio_010=ratios['010'],
+                # delta_active_ratio (esiksiz isim) = birincil esik (%1),
+                # boundary_search bu sutunu okuyor -- geriye donuk uyumlu.
+                delta_active_ratio=ratios['001'])
 
 
 def extract_one(bag_dir: str, default_contact_distance: float) -> dict:
@@ -416,7 +461,18 @@ def extract_one(bag_dir: str, default_contact_distance: float) -> dict:
     im = _intervention_metrics(data['cmd_actual'], data['cmd_nominal'])
     t_contact = _first_contact_time(data['odom_t'], data['obstacle_t'], contact_distance)
     frozen_before_contact = _frozen_before_contact(pm['frozen'], pm['frozen_start_t'], t_contact)
-    dm = _delta_metrics(data['delta_t'], pm['t0'])
+    alpha_val = float(alpha) if alpha not in ('', None) else 1.0
+    dm = _delta_metrics(data['delta_t'], data['h_t'], alpha_val, pm['t0'])
+    # DUZELTME 3 (BOUNDARY_ANALYSIS_FIX_SPEC): L'den BAGIMSIZ marj metrigi.
+    # margin_violation (h<0) lookahead noktasini (p_eff) kullanir -> L
+    # buyudukce korunan nokta govdeden uzaklasir ve h>=0 iken bile GOVDE
+    # carpisabilir (L=0.30'da d_safe-L=0.224 < temas=0.374). body_margin
+    # GOVDE MERKEZINE gore olculur, L'den bagimsizdir:
+    #   body_margin_violation = d_min_center < d_safe
+    # Iliski: contact => body_margin_violation her zaman (0.3737<0.5237,
+    # AYNI nokta) -- L'den bagimsiz dogrulama kontrolu.
+    body_margin_violation = int(dmin < d_safe_val) if dmin == dmin else ''
+    body_margin_depth = max(0.0, d_safe_val - dmin) if dmin == dmin else float('nan')
 
     # İŞ 4 (Ağu 2026): fiziksel olabilirlik dogrulamasi. 600 kosuluk 5.4-B
     # kampanyasinda bir kosuda final_x=-18.32m gibi FIZIKSEL OLARAK IMKANSIZ
@@ -473,6 +529,9 @@ def extract_one(bag_dir: str, default_contact_distance: float) -> dict:
         # dahil CBF hesaplamasinin ta kendisi) -- d_min'den YENIDEN turetilmez.
         # Tolerans icin bkz. MARGIN_VIOLATION_TOL (h=0'da dengelenme gurultusu).
         'margin_violation': int(h_min < MARGIN_VIOLATION_TOL) if h_min == h_min else '',
+        # DUZELTME 3: L'den bagimsiz, govde-referansli marj (bkz. yukarida).
+        'body_margin_violation': body_margin_violation,
+        'body_margin_depth_m': _fmt(body_margin_depth),
         'penetration_depth_m': (f'{max(0.0, contact_distance - dmin):.4f}'
                                  if dmin == dmin else ''),
         'qp_infeasible_count': infeasible_count,
@@ -503,6 +562,12 @@ def extract_one(bag_dir: str, default_contact_distance: float) -> dict:
         'delta_integral': _fmt(dm['delta_integral']),
         'delta_active_ratio': _fmt(dm['delta_active_ratio']),
         'delta_first_t_s': _fmt(dm['delta_first_t']),
+        # DUZELTME 2: delta_rel (kisit-olcegine normalize) + esik duyarliligi.
+        'delta_rel_max': _fmt(dm['delta_rel_max']),
+        'delta_rel_integral': _fmt(dm['delta_rel_integral']),
+        'delta_active_ratio_001': _fmt(dm['delta_active_ratio_001']),
+        'delta_active_ratio_005': _fmt(dm['delta_active_ratio_005']),
+        'delta_active_ratio_010': _fmt(dm['delta_active_ratio_010']),
         'd_safe_mode': d_safe_mode,
         'trajectory_type': trajectory_type,
     }
