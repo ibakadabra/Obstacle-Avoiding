@@ -1,0 +1,52 @@
+# İŞ 7: etkilesim kose testi -- L x w_w
+#
+# OTOMATIK URETILDI (gen_is7_configs.py), ELLE DUZENLEME.
+# T* = 0.5 (v_crit=0.792). Olculen: T=0.0:0.771, T=0.25:0.787, T=0.5:0.792, T=1.0:0.792, T=1.5:0.722, T=2.0:0.713.
+#
+# AMAC: eksenler BAGIMSIZ mi? v_crit farklari yaklasik TOPLAMSALSA
+# eksenleri ayri ayri taramak mesru (İŞ 3/4/5/6'nin yaptigi gibi).
+# Guclu etkilesim varsa SADECE o cift icin 2B tarama gerekir.
+#
+# Sabit hizda (v=1.3) 2x2 kose, N=20 -- sinir aramasi DEGIL.
+scenario:
+  name: is7_L_w_w
+  robot:
+    start: [0.0, 0.0, 0.0]
+    cmd: {v: 0.22, omega: 0.0}
+  obstacle:
+    start: [3.0, 0.3, 3.14159]
+    velocity: [-1.3, 0.0]
+    trajectory_type: straight
+    maneuver_t0: 2.0
+    maneuver_duration: 1.5
+    maneuver_angle_deg: 30.0
+  duration: 30.0
+  settle_time: 2.0
+nominal:
+  type: goal_seeking
+  goal: [4.0, 0.0]
+  k_p: 1.5
+  slowdown_radius: 0.5
+  v_max: 0.22
+  omega_max: 2.84
+filter:
+  alpha: 1.0
+  d_safe: 0.5237
+  prediction_horizon: 0.0
+  control_rate: 10.0
+  mode: DCBF
+  v_min: 0.0
+  cost_normalized: true
+  w_v: 1.0
+  w_w: 1.0
+  lookahead_L: 0.10
+  slack_enabled: true
+  slack_rho: 500.0
+  d_safe_mode: fixed
+  d_safe_fixed: 0.5237
+
+sweep:
+  filter.lookahead_L: [0.10, 0.30]
+  filter.w_w: [0.5, 2.0]
+runs_per_cell: 20
+# 2 x 2 x 20 = 80 kosu
