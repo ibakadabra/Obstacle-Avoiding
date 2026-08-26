@@ -103,9 +103,14 @@ doğrulanmış oldu.
 
 ---
 
-## 4. İŞ 7: bir köşe kullanılabilir, ikisi boşa gitti (tasarım hatam)
+## 4. İŞ 7 — etkileşim köşe testleri (3/3 tamam, tekrar sonrası)
 
-### Kullanılabilir: L × w_w
+> **Güncelleme (26 Ağustos):** T×α ve T×L köşeleri ilk turda yanlış hızda (1.3 m/s —
+> düz senaryonun sınırı, manevralı senaryonunki değil) koşulmuş ve sıfır bilgi
+> vermişti. v=0.75'e düzeltilip 160 koşuyla (0 hata, ~1.7 saat) tekrarlandı. Aşağıdaki
+> sonuçlar düzeltilmiş, tam veri.
+
+### L × w_w — bağımsız
 
 | | w_w=0.5 | w_w=2.0 |
 |---|---|---|
@@ -120,24 +125,57 @@ doğrulanmış oldu.
 | Gerçekleşen | −0.70 |
 | **Etkileşim** | **+0.10 → bağımsız** |
 
-**Sonuç:** L ve w_w yaklaşık toplamsal davranıyor, güçlü etkileşim yok. Yani onları
-ayrı ayrı taramak (İŞ 3 ve İŞ 5) **metodolojik olarak meşruymuş.** Ayrıca L baskın
-etken (−0.75), w_w neredeyse önemsiz (−0.05).
+L ve w_w yaklaşık toplamsal davranıyor. Ayrı ayrı taramak (İŞ 3 ve İŞ 5)
+**metodolojik olarak meşruymuş.**
 
-### Boşa giden: T × α ve T × L
+### T × L — bağımsız
 
-Her iki testte de dört hücrenin dördünde de çarpışma oranı ≈1.00 — hiçbir ayrım yok,
-sıfır bilgi.
+| | L=0.10 | L=0.30 |
+|---|---|---|
+| T=0.0 | 0.72 | 0.78 |
+| T=0.5 | 0.50 | 0.50 |
 
-**Sebep, config üretimindeki hatam:** İŞ 7 köşelerini otomatik üreten script'te test
-hızını **1.3 m/s** sabitledim. Bu, *düz* senaryonun kritik hızı. Ama T×α ve T×L köşeleri
-**manevralı** senaryoda koşuyor ve orada kritik hız **0.79 m/s** (İŞ 6'da ölçtük).
-Yani sınırın ~1.6 katında test edilmişler — doğal olarak her şey çarpışıyor.
+| Etki | Değer |
+|---|---|
+| T tek başına | −0.22 |
+| L tek başına | +0.05 |
+| Toplamsal beklenti | −0.17 |
+| Gerçekleşen | −0.22 |
+| **Etkileşim** | **−0.05 → bağımsız** |
 
-**Düzeltmesi:** aynı iki köşeyi v ≈ 0.75–0.80'de tekrar koşmak. 160 koşu, ~1.7 saat.
+**Yan bulgu — iki sınır yine zıt yönde:** T=0.5, L=0.10 hücresinde çarpışma
+iyileşirken (0.72→0.50) **marj kötüleşiyor** (0.62→0.75, `margin_violation`
+oranı). Öngörü fiziksel temastan koruyor ama tasarım garantisini daha da
+eziyor — daha önceki bulgunun (w_w'de görülen) bir tekrarı.
 
-**Şu an bilinmeyen:** T'nin α ve L ile etkileşimi. L×w_w bağımsız çıktı, ama bu T için
-bir şey söylemiyor.
+### T × α — GÜÇLÜ ETKİLEŞİM (yeni bulgu)
+
+| | α=0.3 | α=2.0 |
+|---|---|---|
+| T=0.0 | 1.00 | 1.00 |
+| T=0.5 | **0.75** | 1.00 |
+
+| Etki | Değer |
+|---|---|
+| T tek başına | −0.25 |
+| α tek başına | 0.00 |
+| Toplamsal beklenti | −0.25 |
+| Gerçekleşen | **0.00** |
+| **Etkileşim** | **+0.25 → GÜÇLÜ** |
+
+n=40/hücre; %75 ile %100 arası fark (~%25) beklenen istatistiksel dalgalanmanın
+(binom std ≈ %8, n=40) 3 katından fazla — gürültü değil.
+
+**Yorum:** öngörünün faydası α'ya bağlı. α=0.3 (erken/yumuşak filtre) T=0.5
+eklenince gerçekten iyileşiyor (çarpışma %100→%75). α=2.0'da (geç/agresif)
+T hiçbir şey değiştirmiyor — muhtemelen filtre zaten aktüatör limitine
+dayandığı için ekstra öngörü bilgisinin kullanacağı "yer" kalmıyor.
+
+> **Metodolojik sonuç:** L×w_w ve T×L bağımsız çıkarken, **T×α güçlü
+> etkileşim gösteriyor.** Yani α ve T'yi (İŞ 4 ve İŞ 6) ayrı ayrı tarayıp
+> her ikisini de "en iyi" seçmek tam doğru değil — bu ikisi birlikte
+> optimize edilmeli, ya da en azından bulgular "diğer parametre sabitken"
+> diye nitelenmeli.
 
 ---
 
@@ -148,13 +186,15 @@ bir şey söylemiyor.
 - α=1.0 üç bağımsız ölçütle doğrulandı
 - Konservatiflik bedeli zaman cinsinden ölçüldü (%14 yavaşlama ↔ çarpışma yarıya)
 - Geometrik eşik tahmini deneysel olarak doğrulandı
-- L ve w_w eksenlerinin bağımsızlığı gösterildi (ayrı tarama meşru)
+- L×w_w ve T×L eksenlerinin bağımsızlığı gösterildi (ayrı tarama meşru)
+- **T×α'nın GÜÇLÜ etkileşim gösterdiği bulundu** (26 Ağustos tekrarı) — bu ikisi
+  ayrı ayrı optimize edilemez, öngörünün faydası filtrenin agresiflik ayarına bağlı
 
 **Açıklar:**
-- T'nin etkileşimleri ölçülmedi (160 koşuluk tekrar gerekiyor)
 - Gürültü tabanı hâlâ resmen ölçülmedi — küçük farklar (örn. 0.696 vs 0.750) gürültü
   sınırında olabilir; bu ölçüm yapılmadan v_crit'leri üç ondalıkla raporlamak sahte
   hassasiyet olur
 
-**Sıradaki öncelik:** gürültü tabanı ölçümü (~300 koşu), sonra İŞ 7'nin iki köşesinin
-doğru hızda tekrarı (~160 koşu).
+**Sıradaki öncelik:** gürültü tabanı ölçümü (~300 koşu); ardından T×α'nın güçlü
+etkileşiminin tezde nasıl ele alınacağına karar (ortak tarama mı, sınırlama olarak
+mı not düşülecek).
